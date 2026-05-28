@@ -100,7 +100,11 @@ class _MessageBubbleState extends State<MessageBubble> {
                         bottomRight: Radius.circular(_isUser ? 4 : 16),
                       ),
                     ),
-                    child: message.isLoading
+                    // Show the typing dots until real text actually arrives —
+                    // not just until isLoading flips — so we never render an
+                    // empty bubble with a lonely streaming cursor.
+                    child: (message.content.trim().isEmpty &&
+                            (message.isLoading || message.isStreaming))
                         ? _TypingIndicator(startTime: message.timestamp)
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

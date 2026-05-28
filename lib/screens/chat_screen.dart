@@ -178,6 +178,11 @@ class _ChatScreenState extends State<ChatScreen> {
         replyMsg.content +=
             '\n\n_(Response truncated — hit the max_tokens limit. Raise it in Settings.)_';
       }
+      // Stream finished but nothing came back — don't leave an empty bubble.
+      if (replyMsg.content.trim().isEmpty) {
+        replyMsg.content =
+            '_(No response came back. Tap Regenerate to try again.)_';
+      }
       setState(() {
         _sending = false;
         replyMsg.isStreaming = false;
