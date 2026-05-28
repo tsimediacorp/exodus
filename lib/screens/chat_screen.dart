@@ -4,6 +4,7 @@ import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
 import '../services/storage_service.dart';
+import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/conversation_drawer.dart';
 import '../widgets/exodus_shield.dart';
@@ -55,6 +56,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _activeStream?.cancel();
+    TtsService.instance.stop();
     _input.dispose();
     _scroll.dispose();
     _ai.dispose();
@@ -79,6 +81,35 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final conv = _current!;
     final userMsg = ChatMessage(content: content, sender: Sender.user);
+
+    setState(() {
+      conv.messages.add(userMsg);
+      _input.clear();
+    });
+
+    await _streamReply(conv, prompt: content);
+  }
+
+  /// Regenerate the assistant reply at [assistantMsg]: drop it and re-run the
+  /// user prompt that preceded it.
+  Future<void> _regenerate(ChatMessage assistantMsg) async {
+    final conv = _current;
+    if (conv == null || _sending) return;
+    final idx = conv.messages.indexOf(assistantMsg);
+    if (idx <= 0) return;
+    final userMsg = conv.messages[idx - 1];
+    if (userMsg.sender != Sender.user) return;
+
+    setState(() {
+      conv.messages.removeAt(idx); // remove old assistant reply
+    });
+    await _streamReply(conv, prompt: userMsg.content);
+  }
+
+  /// Shared streaming routine. Assumes the conversation's last message is the
+  /// user turn we're replying to. Appends a placeholder assistant message,
+  /// streams into it, and persists.
+  Future<void> _streamReply(Conversation conv, {required String prompt}) async {
     final replyMsg = ChatMessage(
       content: '',
       sender: Sender.exodus,
@@ -87,10 +118,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     setState(() {
-      conv.messages.add(userMsg);
       conv.messages.add(replyMsg);
       _sending = true;
-      _input.clear();
     });
     _scrollToEnd();
 
@@ -98,13 +127,15 @@ class _ChatScreenState extends State<ChatScreen> {
     conv.updatedAt = DateTime.now();
     await _persist();
 
+    // History = everything before the prompt's reply placeholder and the
+    // prompt turn itself (the prompt is passed separately to askStream).
     final history = conv.messages.sublist(0, conv.messages.length - 2);
     final completer = Completer<void>();
     final stopwatch = Stopwatch()..start();
 
     try {
       _activeStream = _ai
-          .askStream(userMessage: content, history: history)
+          .askStream(userMessage: prompt, history: history)
           .listen(
         (chunk) {
           setState(() {
@@ -164,6 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _newConversation() {
     _activeStream?.cancel();
+    TtsService.instance.stop();
     setState(() {
       _current = null;
       _sending = false;
@@ -173,6 +205,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _selectConversation(String id) {
     _activeStream?.cancel();
+    TtsService.instance.stop();
     final conv = _conversations.firstWhere((c) => c.id == id);
     setState(() {
       _current = conv;
@@ -331,7 +364,18 @@ class _ChatScreenState extends State<ChatScreen> {
       controller: _scroll,
       padding: const EdgeInsets.only(top: 8, bottom: 12),
       itemCount: _messages.length,
-      itemBuilder: (_, i) => MessageBubble(message: _messages[i]),
+      itemBuilder: (_, i) {
+        final msg = _messages[i];
+        return MessageBubble(
+          // Keyed by identity so Flutter keeps each bubble's expanded/action
+          // state attached to the right message as the list grows.
+          key: ObjectKey(msg),
+          message: msg,
+          onRegenerate: msg.sender == Sender.exodus && !_sending
+              ? () => _regenerate(msg)
+              : null,
+        );
+      },
     );
   }
 

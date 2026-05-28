@@ -1,0 +1,58 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#16223F"/>
+      <stop offset="55%" stop-color="#0D1426"/>
+      <stop offset="100%" stop-color="#070A14"/>
+    </radialGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#23407A"/>
+      <stop offset="100%" stop-color="#0C1730"/>
+    </linearGradient>
+    <linearGradient id="cross" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F0D596"/>
+      <stop offset="100%" stop-color="#C9A961"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E5C880"/>
+      <stop offset="100%" stop-color="#B8923F"/>
+    </linearGradient>
+    <filter id="blueGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="26" result="b"/>
+      <feMerge><feMergeNode in="b"/></feMerge>
+    </filter>
+    <filter id="goldGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Soft blue halo behind the shield -->
+  <path d="M293.6,260.84 L730.4,260.84 L730.4,512 Q730.4,721.3 512,799 Q293.6,721.3 293.6,512 Z"
+        fill="#3B6FE3" opacity="0.30" filter="url(#blueGlow)"/>
+
+  <!-- Shield body -->
+  <path d="M293.6,260.84 L730.4,260.84 L730.4,512 Q730.4,721.3 512,799 Q293.6,721.3 293.6,512 Z"
+        fill="url(#shield)"/>
+
+  <!-- Inner bevel highlight -->
+  <path d="M293.6,260.84 L730.4,260.84 L730.4,512 Q730.4,721.3 512,799 Q293.6,721.3 293.6,512 Z"
+        fill="none" stroke="#5A8DFF" stroke-opacity="0.20" stroke-width="6"
+        transform="translate(10,8) scale(0.962)"/>
+
+  <!-- Brass border -->
+  <path d="M293.6,260.84 L730.4,260.84 L730.4,512 Q730.4,721.3 512,799 Q293.6,721.3 293.6,512 Z"
+        fill="none" stroke="url(#brass)" stroke-width="15" stroke-linejoin="round"/>
+
+  <!-- Cross glow -->
+  <g filter="url(#goldGlow)" opacity="0.55">
+    <rect x="491.2" y="344.56" width="41.6" height="328.9" rx="6" fill="#E5C880"/>
+    <rect x="408" y="428.28" width="208" height="47.84" rx="6" fill="#E5C880"/>
+  </g>
+
+  <!-- Cross -->
+  <rect x="491.2" y="344.56" width="41.6" height="328.9" rx="6" fill="url(#cross)"/>
+  <rect x="408" y="428.28" width="208" height="47.84" rx="6" fill="url(#cross)"/>
+</svg>
