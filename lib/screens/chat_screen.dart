@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
@@ -23,12 +26,19 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scroll = ScrollController();
   final AiService _ai = AiService();
   final StorageService _storage = StorageService.instance;
+  final ImagePicker _picker = ImagePicker();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<Conversation> _conversations = [];
   Conversation? _current;
   bool _sending = false;
   StreamSubscription<String>? _activeStream;
+
+  /// Images staged for the next message, as data URLs ("data:image/...;base64,").
+  final List<String> _pendingImages = [];
+
+  /// Cap attachments per message to keep request payloads sane.
+  static const int _maxAttachments = 4;
 
   final List<String> _starters = const [
     'How do we lead our marriage spiritually as newlyweds?',
@@ -68,9 +78,101 @@ class _ChatScreenState extends State<ChatScreen> {
     await _storage.setCurrentConversationId(_current?.id);
   }
 
+  /// Let the user pick where the image comes from, then pick one.
+  Future<void> _attachImage() async {
+    if (_pendingImages.length >= _maxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Up to $_maxAttachments images per message.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: ExodusTheme.obsidian,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading:
+                  const Icon(Icons.photo_library_outlined, color: ExodusTheme.ironMist),
+              title: const Text('Choose from library',
+                  style: TextStyle(color: ExodusTheme.porcelain)),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.photo_camera_outlined, color: ExodusTheme.ironMist),
+              title: const Text('Take a photo',
+                  style: TextStyle(color: ExodusTheme.porcelain)),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    await _pickImage(source);
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final file = await _picker.pickImage(
+        source: source,
+        // Downscale + compress so base64 payloads stay small enough for the
+        // model context and local storage.
+        maxWidth: 1280,
+        maxHeight: 1280,
+        imageQuality: 75,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final mime = _mimeForPath(file.path);
+      final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      if (!mounted) return;
+      setState(() => _pendingImages.add(dataUrl));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not attach image: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  String _mimeForPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.heic') || lower.endsWith('.heif')) return 'image/heic';
+    return 'image/jpeg';
+  }
+
+  void _removePendingImage(int index) {
+    setState(() => _pendingImages.removeAt(index));
+  }
+
+  /// Decode the base64 payload of a "data:...;base64,XXXX" URL for display.
+  static Uint8List? _decodeDataUrl(String dataUrl) {
+    final comma = dataUrl.indexOf(',');
+    if (comma == -1) return null;
+    try {
+      return base64Decode(dataUrl.substring(comma + 1));
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _send([String? text]) async {
     final content = (text ?? _input.text).trim();
-    if (content.isEmpty || _sending) return;
+    // Allow sending with images only (no text), but never an empty message.
+    if ((content.isEmpty && _pendingImages.isEmpty) || _sending) return;
 
     // Create-on-first-message: avoids empty "New conversation" entries in history.
     if (_current == null) {
@@ -80,14 +182,17 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final conv = _current!;
-    final userMsg = ChatMessage(content: content, sender: Sender.user);
+    final images = List<String>.from(_pendingImages);
+    final userMsg =
+        ChatMessage(content: content, sender: Sender.user, images: images);
 
     setState(() {
       conv.messages.add(userMsg);
       _input.clear();
+      _pendingImages.clear();
     });
 
-    await _streamReply(conv, prompt: content);
+    await _streamReply(conv, prompt: content, images: images);
   }
 
   /// Regenerate the assistant reply at [assistantMsg]: drop it and re-run the
@@ -103,13 +208,14 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       conv.messages.removeAt(idx); // remove old assistant reply
     });
-    await _streamReply(conv, prompt: userMsg.content);
+    await _streamReply(conv, prompt: userMsg.content, images: userMsg.images);
   }
 
   /// Shared streaming routine. Assumes the conversation's last message is the
   /// user turn we're replying to. Appends a placeholder assistant message,
   /// streams into it, and persists.
-  Future<void> _streamReply(Conversation conv, {required String prompt}) async {
+  Future<void> _streamReply(Conversation conv,
+      {required String prompt, List<String> images = const []}) async {
     final replyMsg = ChatMessage(
       content: '',
       sender: Sender.exodus,
@@ -135,7 +241,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       _activeStream = _ai
-          .askStream(userMessage: prompt, history: history)
+          .askStream(userMessage: prompt, history: history, images: images)
           .listen(
         (chunk) {
           setState(() {
@@ -391,9 +497,20 @@ class _ChatScreenState extends State<ChatScreen> {
         border: Border(top: BorderSide(color: ExodusTheme.steel, width: 1)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_pendingImages.isNotEmpty) _buildPendingImages(),
+          Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          IconButton(
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            color: ExodusTheme.ironMist,
+            tooltip: 'Attach image',
+            onPressed: _sending ? null : _attachImage,
+          ),
+          const SizedBox(width: 4),
           Expanded(
             child: TextField(
               controller: _input,
@@ -437,6 +554,54 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Horizontal strip of staged-image thumbnails shown above the input row,
+  /// each with a remove button.
+  Widget _buildPendingImages() {
+    return Container(
+      height: 76,
+      margin: const EdgeInsets.only(bottom: 10),
+      alignment: Alignment.centerLeft,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _pendingImages.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final bytes = _decodeDataUrl(_pendingImages[i]);
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: bytes == null
+                    ? const SizedBox(width: 68, height: 68)
+                    : Image.memory(bytes,
+                        width: 68, height: 68, fit: BoxFit.cover),
+              ),
+              Positioned(
+                top: -6,
+                right: -6,
+                child: GestureDetector(
+                  onTap: () => _removePendingImage(i),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: ExodusTheme.obsidian,
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(2),
+                    child: const Icon(Icons.cancel,
+                        size: 20, color: ExodusTheme.ironMist),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

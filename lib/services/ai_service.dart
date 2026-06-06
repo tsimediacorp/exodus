@@ -24,6 +24,7 @@ class AiService {
   Stream<String> askStream({
     required String userMessage,
     required List<ChatMessage> history,
+    List<String> images = const [],
   }) async* {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -39,7 +40,8 @@ class AiService {
         'X-Title': 'EXODUS',
       },
     });
-    request.body = jsonEncode(_buildBody(userMessage, history, stream: true));
+    request.body =
+        jsonEncode(_buildBody(userMessage, history, stream: true, images: images));
 
     final response = await _client.send(request);
 
@@ -84,6 +86,7 @@ class AiService {
   Future<String> ask({
     required String userMessage,
     required List<ChatMessage> history,
+    List<String> images = const [],
   }) async {
     final provider = MasterPrompt.activeProvider;
     final config = _providerConfig(provider);
@@ -98,7 +101,7 @@ class AiService {
           'X-Title': 'EXODUS',
         },
       },
-      body: jsonEncode(_buildBody(userMessage, history, stream: false)),
+      body: jsonEncode(_buildBody(userMessage, history, stream: false, images: images)),
     );
 
     if (response.statusCode != 200) {
@@ -115,13 +118,29 @@ class AiService {
     String userMessage,
     List<ChatMessage> history, {
     required bool stream,
+    List<String> images = const [],
   }) {
-    final messages = [
+    // Build the current user turn. With attachments it uses the multimodal
+    // parts array (text + image_url blocks); without, a plain string.
+    final Object currentContent = images.isEmpty
+        ? userMessage
+        : [
+            if (userMessage.trim().isNotEmpty)
+              {'type': 'text', 'text': userMessage},
+            for (final url in images)
+              {
+                'type': 'image_url',
+                'image_url': {'url': url},
+              },
+          ];
+
+    final messages = <Map<String, dynamic>>[
       {'role': 'system', 'content': MasterPrompt.build()},
       ...history
-          .where((m) => !m.isLoading && m.content.isNotEmpty)
+          .where((m) =>
+              !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))
           .map((m) => m.toApiFormat()),
-      {'role': 'user', 'content': userMessage},
+      {'role': 'user', 'content': currentContent},
     ];
 
     return {

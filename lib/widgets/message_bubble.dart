@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
@@ -5,6 +6,16 @@ import '../models/chat_message.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import 'exodus_shield.dart';
+
+Uint8List? _decodeDataUrl(String dataUrl) {
+  final comma = dataUrl.indexOf(',');
+  if (comma == -1) return null;
+  try {
+    return base64Decode(dataUrl.substring(comma + 1));
+  } catch (_) {
+    return null;
+  }
+}
 
 String _formatElapsed(int ms) {
   if (ms < 1000) return '${ms}ms';
@@ -110,7 +121,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (_isUser)
+                              if (message.images.isNotEmpty)
+                                _AttachedImages(
+                                  images: message.images,
+                                  hasText: message.content.trim().isNotEmpty,
+                                ),
+                              if (_isUser && message.content.trim().isNotEmpty)
                                 SelectableText(
                                   message.content,
                                   style: const TextStyle(
@@ -120,7 +136,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     fontWeight: FontWeight.w500,
                                   ),
                                 )
-                              else
+                              else if (!_isUser)
                                 GptMarkdown(
                                   message.content,
                                   style: const TextStyle(
@@ -379,6 +395,90 @@ class _TypingIndicatorState extends State<_TypingIndicator>
           ],
         );
       },
+    );
+  }
+}
+
+/// Thumbnails for images attached to a message. Tapping one opens a
+/// full-screen, pinch-to-zoom viewer.
+class _AttachedImages extends StatelessWidget {
+  final List<String> images;
+  final bool hasText;
+
+  const _AttachedImages({required this.images, required this.hasText});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: hasText ? 10 : 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final url in images) _thumb(context, url),
+        ],
+      ),
+    );
+  }
+
+  Widget _thumb(BuildContext context, String url) {
+    final bytes = _decodeDataUrl(url);
+    if (bytes == null) return const SizedBox.shrink();
+    return GestureDetector(
+      onTap: () => _openViewer(context, bytes),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.memory(
+          bytes,
+          width: 160,
+          height: 160,
+          fit: BoxFit.cover,
+        ),
+      ),
+    );
+  }
+
+  void _openViewer(BuildContext context, Uint8List bytes) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black87,
+        pageBuilder: (_, __, ___) => _ImageViewer(bytes: bytes),
+      ),
+    );
+  }
+}
+
+class _ImageViewer extends StatelessWidget {
+  final Uint8List bytes;
+  const _ImageViewer({required this.bytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4,
+                child: Image.memory(bytes),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
