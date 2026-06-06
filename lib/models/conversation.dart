@@ -45,7 +45,8 @@ class Conversation {
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         'messages': messages
-            .where((m) => !m.isLoading && m.content.isNotEmpty)
+            .where((m) =>
+                !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))
             .map((m) => m.toJson())
             .toList(),
       };

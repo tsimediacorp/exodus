@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>EXODUS needs access to your photos so you can share an image for biblical counsel.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>EXODUS needs camera access so you can take a photo to share for biblical counsel.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
