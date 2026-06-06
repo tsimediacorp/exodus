@@ -151,7 +151,7 @@ Distinctive habits:
   /// Per-provider model IDs. Edit to swap models.
   /// (These are not runtime-overridable — they belong with the code.)
   static const Map<String, String> models = {
-    'openrouter': 'z-ai/glm-4.6',            // GLM via OpenRouter
+    'openrouter': 'z-ai/glm-4.6v',           // GLM via OpenRouter (vision-capable)
     'glm':        'glm-4-plus',              // direct Zhipu
     'venice':     'venice-uncensored',       // Venice (Axion-style)
   };
