@@ -8,6 +8,8 @@
 	<string>EXODUS needs access to your photos so you can share an image for biblical counsel.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>EXODUS needs camera access so you can take a photo to share for biblical counsel.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>EXODUS needs microphone access for live voice coaching sessions.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
+import '../models/coaching_session.dart';
 import '../models/conversation.dart';
 
 /// Persists conversations and MasterPrompt runtime overrides to
@@ -27,6 +28,7 @@ class StorageService {
   static const _kTemperature       = 'exodus.model.temperature';
   static const _kMaxTokens         = 'exodus.model.maxTokens';
   static const _kActiveProvider    = 'exodus.model.activeProvider';
+  static const _kCoachingSessions  = 'exodus.coachingSessions';
 
   Future<void> init() async {
     try {
@@ -115,6 +117,35 @@ class StorageService {
     } else {
       await p.setString(_kCurrentConvId, id);
     }
+  }
+
+  // ---------------- Coaching sessions ----------------
+
+  List<CoachingSession> loadCoachingSessions() {
+    final p = _prefs;
+    if (p == null) return [];
+    final raw = p.getString(_kCoachingSessions);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>)
+          .map((e) => CoachingSession.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveCoachingSessions(List<CoachingSession> sessions) async {
+    final p = _prefs;
+    if (p == null) return;
+    await p.setString(
+        _kCoachingSessions, jsonEncode(sessions.map((s) => s.toJson()).toList()));
+  }
+
+  /// Append a finished session to history (newest first).
+  Future<void> addCoachingSession(CoachingSession session) async {
+    final all = loadCoachingSessions()..insert(0, session);
+    await saveCoachingSessions(all);
   }
 
   // ---------------- Prompt overrides ----------------
