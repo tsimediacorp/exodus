@@ -39,26 +39,40 @@ class RealtimeVoiceService {
   bool get isConnected =>
       _pc != null && state.value != VoiceState.error && state.value != VoiceState.closed;
 
-  /// Mint an ephemeral realtime session key from the standalone OpenAI key.
-  /// This keeps the long-lived key out of the SDP exchange.
+  /// Build the realtime session config (GA schema): instructions, voice,
+  /// server-VAD turn detection (enables natural barge-in), and input
+  /// transcription so we can caption the couple.
+  Map<String, dynamic> _sessionConfig(String instructions) => {
+        'type': 'realtime',
+        'model': CoachingPrompt.model,
+        'instructions': instructions,
+        'output_modalities': ['audio'],
+        'audio': {
+          'input': {
+            'transcription': {'model': 'whisper-1'},
+            'turn_detection': {'type': 'server_vad', 'create_response': true},
+          },
+          'output': {'voice': CoachingPrompt.voice},
+        },
+      };
+
+  /// Mint an ephemeral realtime key (GA endpoint) from the standalone OpenAI
+  /// key, with the full session config baked in. Keeps the long-lived key out
+  /// of the SDP exchange. Returns the ephemeral client secret.
   Future<String> _mintEphemeralKey({required String instructions}) async {
     final res = await http.post(
-      Uri.parse('https://api.openai.com/v1/realtime/sessions'),
+      Uri.parse('https://api.openai.com/v1/realtime/client_secrets'),
       headers: {
         'Authorization': 'Bearer ${ApiKeys.openAi}',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({
-        'model': CoachingPrompt.model,
-        'voice': CoachingPrompt.voice,
-        'instructions': instructions,
-      }),
+      body: jsonEncode({'session': _sessionConfig(instructions)}),
     );
     if (res.statusCode != 200) {
       throw Exception('Realtime session mint failed (${res.statusCode}): ${res.body}');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return (data['client_secret'] as Map<String, dynamic>)['value'] as String;
+    return data['value'] as String;
   }
 
   Future<void> connect({required int minutes}) async {
@@ -102,8 +116,9 @@ class RealtimeVoiceService {
       _dc = dc;
       dc.onMessage = (RTCDataChannelMessage msg) => _handleEvent(msg.text);
       dc.onDataChannelState = (s) {
+        // Session is fully configured at mint time, so once the events
+        // channel opens we're ready to listen.
         if (s == RTCDataChannelState.RTCDataChannelOpen) {
-          _configureSession(instructions);
           state.value = VoiceState.listening;
         }
       };
@@ -113,7 +128,7 @@ class RealtimeVoiceService {
       await pc.setLocalDescription(offer);
 
       final sdpRes = await http.post(
-        Uri.parse('https://api.openai.com/v1/realtime?model=${CoachingPrompt.model}'),
+        Uri.parse('https://api.openai.com/v1/realtime/calls?model=${CoachingPrompt.model}'),
         headers: {
           'Authorization': 'Bearer $ephemeral',
           'Content-Type': 'application/sdp',
@@ -130,20 +145,6 @@ class RealtimeVoiceService {
     }
   }
 
-  /// Configure turn detection (server VAD enables natural barge-in) and ask
-  /// for input transcription so we can caption the couple too.
-  void _configureSession(String instructions) {
-    _send({
-      'type': 'session.update',
-      'session': {
-        'instructions': instructions,
-        'voice': CoachingPrompt.voice,
-        'turn_detection': {'type': 'server_vad', 'create_response': true},
-        'input_audio_transcription': {'model': 'whisper-1'},
-      },
-    });
-  }
-
   void _send(Map<String, dynamic> event) {
     _dc?.send(RTCDataChannelMessage(jsonEncode(event)));
   }
@@ -158,32 +159,30 @@ class RealtimeVoiceService {
     } catch (_) {
       return;
     }
-    switch (e['type']) {
-      case 'input_audio_buffer.speech_started':
-        state.value = VoiceState.listening;
-        liveCaption.value = '';
-        break;
-      case 'conversation.item.input_audio_transcription.completed':
-        final t = (e['transcript'] as String?)?.trim() ?? '';
-        if (t.isNotEmpty) onTurn?.call(CoachingTurn(speaker: 'couple', text: t));
-        liveCaption.value = '';
-        break;
-      case 'response.audio_transcript.delta':
-        state.value = VoiceState.speaking;
-        _coachBuf.write(e['delta'] as String? ?? '');
-        liveCaption.value = _coachBuf.toString();
-        break;
-      case 'response.audio_transcript.done':
-        final full = (e['transcript'] as String?)?.trim() ?? _coachBuf.toString().trim();
-        if (full.isNotEmpty) onTurn?.call(CoachingTurn(speaker: 'exodus', text: full));
-        _coachBuf.clear();
-        liveCaption.value = '';
-        state.value = VoiceState.listening;
-        break;
-      case 'error':
-        final msg = (e['error'] as Map<String, dynamic>?)?['message'] as String?;
-        _fail(msg ?? 'Realtime error');
-        break;
+    final type = e['type'] as String? ?? '';
+
+    // Match on suffixes so we tolerate the GA rename of audio events
+    // (e.g. response.audio_transcript.delta → response.output_audio_transcript.delta).
+    if (type == 'input_audio_buffer.speech_started') {
+      state.value = VoiceState.listening;
+      liveCaption.value = '';
+    } else if (type.contains('input_audio_transcription.completed')) {
+      final t = (e['transcript'] as String?)?.trim() ?? '';
+      if (t.isNotEmpty) onTurn?.call(CoachingTurn(speaker: 'couple', text: t));
+      liveCaption.value = '';
+    } else if (type.endsWith('audio_transcript.delta')) {
+      state.value = VoiceState.speaking;
+      _coachBuf.write(e['delta'] as String? ?? '');
+      liveCaption.value = _coachBuf.toString();
+    } else if (type.endsWith('audio_transcript.done')) {
+      final full = (e['transcript'] as String?)?.trim() ?? _coachBuf.toString().trim();
+      if (full.isNotEmpty) onTurn?.call(CoachingTurn(speaker: 'exodus', text: full));
+      _coachBuf.clear();
+      liveCaption.value = '';
+      state.value = VoiceState.listening;
+    } else if (type == 'error') {
+      final msg = (e['error'] as Map<String, dynamic>?)?['message'] as String?;
+      _fail(msg ?? 'Realtime error');
     }
   }
 
