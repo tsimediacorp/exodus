@@ -56,11 +56,34 @@ class RealtimeVoiceService {
         },
       };
 
+  /// Friendly message for HTTP 429 from the realtime API. New OpenAI projects
+  /// have low realtime session limits, and rapid re-connects trip them.
+  static const _rateLimitMsg =
+      "EXODUS's live voice is busy right now (rate limit). Give it a few "
+      "seconds, then start the session again.";
+
+  /// POST with up to [tries] attempts, backing off on HTTP 429.
+  Future<http.Response> _postRetrying(
+    Uri url, {
+    required Map<String, String> headers,
+    required Object body,
+    int tries = 3,
+  }) async {
+    http.Response res = await http.post(url, headers: headers, body: body);
+    var attempt = 1;
+    while (res.statusCode == 429 && attempt < tries) {
+      await Future.delayed(Duration(milliseconds: 1200 * attempt));
+      res = await http.post(url, headers: headers, body: body);
+      attempt++;
+    }
+    return res;
+  }
+
   /// Mint an ephemeral realtime key (GA endpoint) from the standalone OpenAI
   /// key, with the full session config baked in. Keeps the long-lived key out
   /// of the SDP exchange. Returns the ephemeral client secret.
   Future<String> _mintEphemeralKey({required String instructions}) async {
-    final res = await http.post(
+    final res = await _postRetrying(
       Uri.parse('https://api.openai.com/v1/realtime/client_secrets'),
       headers: {
         'Authorization': 'Bearer ${ApiKeys.openAi}',
@@ -68,6 +91,7 @@ class RealtimeVoiceService {
       },
       body: jsonEncode({'session': _sessionConfig(instructions)}),
     );
+    if (res.statusCode == 429) throw Exception(_rateLimitMsg);
     if (res.statusCode != 200) {
       throw Exception('Realtime session mint failed (${res.statusCode}): ${res.body}');
     }
@@ -127,14 +151,15 @@ class RealtimeVoiceService {
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      final sdpRes = await http.post(
+      final sdpRes = await _postRetrying(
         Uri.parse('https://api.openai.com/v1/realtime/calls?model=${CoachingPrompt.model}'),
         headers: {
           'Authorization': 'Bearer $ephemeral',
           'Content-Type': 'application/sdp',
         },
-        body: offer.sdp,
+        body: offer.sdp ?? '',
       );
+      if (sdpRes.statusCode == 429) throw Exception(_rateLimitMsg);
       if (sdpRes.statusCode >= 300) {
         throw Exception('SDP exchange failed (${sdpRes.statusCode}): ${sdpRes.body}');
       }
@@ -198,7 +223,7 @@ class RealtimeVoiceService {
   }
 
   void _fail(String message) {
-    error.value = message;
+    error.value = message.replaceFirst(RegExp(r'^Exception:\s*'), '');
     state.value = VoiceState.error;
   }
 

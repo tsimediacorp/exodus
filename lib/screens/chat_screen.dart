@@ -9,25 +9,26 @@ import '../services/ai_service.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
-import '../widgets/conversation_drawer.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/message_bubble.dart';
 import 'settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  /// Opens the app-wide left drawer (owned by HomeShell).
+  final VoidCallback? onOpenMenu;
+  const ChatScreen({super.key, this.onOpenMenu});
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<ChatScreen> createState() => ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+/// Public so HomeShell can drive conversation selection from the shared drawer.
+class ChatScreenState extends State<ChatScreen> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final AiService _ai = AiService();
   final StorageService _storage = StorageService.instance;
   final ImagePicker _picker = ImagePicker();
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<Conversation> _conversations = [];
   Conversation? _current;
@@ -304,7 +305,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _newConversation() {
+  /// Id of the open conversation (null = none yet). Read by HomeShell's drawer.
+  String? get currentId => _current?.id;
+
+  void newConversation() {
     _activeStream?.cancel();
     TtsService.instance.stop();
     setState(() {
@@ -314,7 +318,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _storage.setCurrentConversationId(null);
   }
 
-  void _selectConversation(String id) {
+  void openConversation(String id) {
     _activeStream?.cancel();
     TtsService.instance.stop();
     final conv = _conversations.firstWhere((c) => c.id == id);
@@ -326,13 +330,34 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
   }
 
-  Future<void> _deleteConversation(String id) async {
+  Future<void> deleteConversationById(String id) async {
     final wasCurrent = _current?.id == id;
     setState(() {
       _conversations = _conversations.where((c) => c.id != id).toList();
       if (wasCurrent) _current = null;
     });
     await _persist();
+  }
+
+  /// Edit a previously sent user message: drop it and everything after it,
+  /// then load its text back into the composer so the user can revise and
+  /// resend (which re-streams EXODUS's reply from that point).
+  void _editMessage(ChatMessage msg) {
+    final conv = _current;
+    if (conv == null || _sending) return;
+    final idx = conv.messages.indexOf(msg);
+    if (idx < 0) return;
+    _activeStream?.cancel();
+    TtsService.instance.stop();
+    setState(() {
+      _input.text = msg.content;
+      _pendingImages
+        ..clear()
+        ..addAll(msg.images);
+      conv.messages.removeRange(idx, conv.messages.length);
+      _sending = false;
+    });
+    _persist();
   }
 
   Future<void> _openSettings() async {
@@ -357,27 +382,19 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      key: _scaffoldKey,
-      drawer: ConversationDrawer(
-        conversations: _conversations,
-        currentId: _current?.id,
-        onNewConversation: _newConversation,
-        onSelect: _selectConversation,
-        onDelete: _deleteConversation,
-      ),
       appBar: AppBar(
         title: const Text('EXODUS'),
         leading: IconButton(
           icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
-          tooltip: 'Conversations',
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          tooltip: 'Menu',
+          onPressed: widget.onOpenMenu,
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.add_comment_outlined,
                 color: ExodusTheme.ironMist),
             tooltip: 'New conversation',
-            onPressed: _newConversation,
+            onPressed: newConversation,
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined,
@@ -484,6 +501,9 @@ class _ChatScreenState extends State<ChatScreen> {
           message: msg,
           onRegenerate: msg.sender == Sender.exodus && !_sending
               ? () => _regenerate(msg)
+              : null,
+          onEdit: msg.sender == Sender.user && !_sending
+              ? () => _editMessage(msg)
               : null,
         );
       },

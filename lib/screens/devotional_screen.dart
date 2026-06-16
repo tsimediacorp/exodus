@@ -11,7 +11,8 @@ import 'devotional_goal_screen.dart';
 const int _kMorningHour = 7;
 
 class DevotionalScreen extends StatefulWidget {
-  const DevotionalScreen({super.key});
+  final VoidCallback? onOpenMenu;
+  const DevotionalScreen({super.key, this.onOpenMenu});
 
   @override
   State<DevotionalScreen> createState() => _DevotionalScreenState();
@@ -108,7 +109,11 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Devotional'),
-        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
+          tooltip: 'Menu',
+          onPressed: widget.onOpenMenu,
+        ),
         actions: [
           if (_goal != null)
             TextButton(
