@@ -29,6 +29,10 @@ class AiService {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
     final config = _providerConfig(provider);
+    if (config.apiKey.isEmpty) {
+      throw Exception(
+          'No API key configured for "$provider". Check the .env file.');
+    }
 
     final request = http.Request('POST', Uri.parse(config.endpoint));
     request.headers.addAll({
@@ -92,6 +96,10 @@ class AiService {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
     final config = _providerConfig(provider);
+    if (config.apiKey.isEmpty) {
+      throw Exception(
+          'No API key configured for "$provider". Check the .env file.');
+    }
 
     final response = await _client.post(
       Uri.parse(config.endpoint),
