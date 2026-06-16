@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
-import 'chat_screen.dart';
+import 'home_shell.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -33,7 +33,7 @@ class _SplashScreenState extends State<SplashScreen>
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           transitionDuration: const Duration(milliseconds: 600),
-          pageBuilder: (_, __, ___) => const ChatScreen(),
+          pageBuilder: (_, __, ___) => const HomeShell(),
           transitionsBuilder: (_, anim, __, child) =>
               FadeTransition(opacity: anim, child: child),
         ),

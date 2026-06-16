@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/splash_screen.dart';
+import 'services/notification_service.dart';
 import 'services/storage_service.dart';
 import 'theme/exodus_theme.dart';
 
@@ -34,6 +35,12 @@ Future<void> main() async {
     } catch (e, st) {
       // Don't crash to white — capture it so we can see what happened.
       _startupError = 'Storage init failed:\n$e\n\n$st';
+    }
+
+    try {
+      await NotificationService.instance.init();
+    } catch (_) {
+      // Notifications are best-effort; the app still works without them.
     }
 
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(

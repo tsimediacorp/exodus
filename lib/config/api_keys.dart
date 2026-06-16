@@ -13,4 +13,8 @@ class ApiKeys {
   static String get openRouter => dotenv.env['OPENROUTER_API_KEY'] ?? '';
   static String get glm        => dotenv.env['GLM_API_KEY'] ?? '';
   static String get venice     => dotenv.env['VENICE_API_KEY'] ?? '';
+
+  /// OpenAI key — used only by the realtime voice coaching feature
+  /// (gpt-realtime over WebRTC). Not used by the text chat providers.
+  static String get openAi     => dotenv.env['OPENAI_API_KEY'] ?? '';
 }
