@@ -87,7 +87,9 @@ class AiService {
     required String userMessage,
     required List<ChatMessage> history,
     List<String> images = const [],
+    int? maxTokens,
   }) async {
+    lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
     final config = _providerConfig(provider);
 
@@ -101,7 +103,8 @@ class AiService {
           'X-Title': 'EXODUS',
         },
       },
-      body: jsonEncode(_buildBody(userMessage, history, stream: false, images: images)),
+      body: jsonEncode(_buildBody(userMessage, history,
+          stream: false, images: images, maxTokens: maxTokens)),
     );
 
     if (response.statusCode != 200) {
@@ -111,7 +114,16 @@ class AiService {
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return data['choices'][0]['message']['content'] as String;
+    final choices = data['choices'] as List?;
+    final choice = (choices != null && choices.isNotEmpty)
+        ? choices.first as Map<String, dynamic>
+        : null;
+    lastFinishReason = choice?['finish_reason'] as String?;
+    // Reasoning models (e.g. glm-4.6v) can return a null `content` when they
+    // spend the whole token budget on hidden reasoning and hit the length cap.
+    // Never cast null → String (that was crashing callers); return "" instead.
+    final content = (choice?['message'] as Map<String, dynamic>?)?['content'];
+    return content is String ? content : '';
   }
 
   Map<String, dynamic> _buildBody(
@@ -119,6 +131,7 @@ class AiService {
     List<ChatMessage> history, {
     required bool stream,
     List<String> images = const [],
+    int? maxTokens,
   }) {
     // Build the current user turn. With attachments it uses the multimodal
     // parts array (text + image_url blocks); without, a plain string.
@@ -147,7 +160,7 @@ class AiService {
       'model': MasterPrompt.models[MasterPrompt.activeProvider],
       'messages': messages,
       'temperature': MasterPrompt.temperature,
-      'max_tokens': MasterPrompt.maxTokens,
+      'max_tokens': maxTokens ?? MasterPrompt.maxTokens,
       if (stream) 'stream': true,
     };
   }
