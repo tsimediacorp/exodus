@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
+import '../services/memory_service.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
@@ -27,6 +28,7 @@ class ChatScreenState extends State<ChatScreen> {
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final AiService _ai = AiService();
+  final MemoryService _memory = MemoryService();
   final StorageService _storage = StorageService.instance;
   final ImagePicker _picker = ImagePicker();
 
@@ -71,7 +73,18 @@ class ChatScreenState extends State<ChatScreen> {
     _input.dispose();
     _scroll.dispose();
     _ai.dispose();
+    _memory.dispose();
     super.dispose();
+  }
+
+  /// Fire-and-forget: distill durable memory from a conversation we're leaving.
+  void _captureMemory(Conversation? conv) {
+    if (conv == null) return;
+    final meaningful = conv.messages
+        .where((m) => !m.isLoading && m.content.trim().isNotEmpty)
+        .length;
+    if (meaningful < 2) return;
+    _memory.captureFromChat(List.of(conv.messages));
   }
 
   Future<void> _persist() async {
@@ -309,6 +322,7 @@ class ChatScreenState extends State<ChatScreen> {
   String? get currentId => _current?.id;
 
   void newConversation() {
+    _captureMemory(_current);
     _activeStream?.cancel();
     TtsService.instance.stop();
     setState(() {
@@ -319,6 +333,7 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   void openConversation(String id) {
+    if (id != _current?.id) _captureMemory(_current);
     _activeStream?.cancel();
     TtsService.instance.stop();
     final conv = _conversations.firstWhere((c) => c.id == id);

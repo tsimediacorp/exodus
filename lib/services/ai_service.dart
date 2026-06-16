@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config/master_prompt.dart';
 import '../config/api_keys.dart';
 import '../models/chat_message.dart';
+import 'memory_store.dart';
 
 /// Routes requests to whichever provider is set in MasterPrompt.activeProvider.
 /// OpenAI-compatible providers (OpenRouter, Venice, Zhipu's OpenAI-compat
@@ -156,7 +157,7 @@ class AiService {
           ];
 
     final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': MasterPrompt.build()},
+      {'role': 'system', 'content': MasterPrompt.build() + MemoryStore.instance.promptBlock()},
       ...history
           .where((m) =>
               !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))

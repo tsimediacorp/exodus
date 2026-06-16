@@ -5,6 +5,7 @@ import '../models/chat_message.dart';
 import '../models/coaching_session.dart';
 import '../models/conversation.dart';
 import '../models/devotional.dart';
+import '../models/memory_item.dart';
 
 /// Persists conversations and MasterPrompt runtime overrides to
 /// shared_preferences (which on iOS is NSUserDefaults — local to the app,
@@ -32,6 +33,7 @@ class StorageService {
   static const _kCoachingSessions  = 'exodus.coachingSessions';
   static const _kDevotionalGoal    = 'exodus.devotional.goal';
   static const _kDevotionals       = 'exodus.devotional.entries';
+  static const _kMemory            = 'exodus.memory.items';
 
   Future<void> init() async {
     try {
@@ -198,6 +200,25 @@ class StorageService {
     all.sort((a, b) => b.day.compareTo(a.day));
     await _prefs?.setString(
         _kDevotionals, jsonEncode(all.map((d) => d.toJson()).toList()));
+  }
+
+  // ---------------- Memory ----------------
+
+  List<MemoryItem> loadMemory() {
+    final raw = _prefs?.getString(_kMemory);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>)
+          .map((e) => MemoryItem.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveMemory(List<MemoryItem> items) async {
+    await _prefs?.setString(
+        _kMemory, jsonEncode(items.map((m) => m.toJson()).toList()));
   }
 
   // ---------------- Prompt overrides ----------------

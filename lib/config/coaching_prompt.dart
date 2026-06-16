@@ -1,4 +1,5 @@
 import 'master_prompt.dart';
+import '../services/memory_store.dart';
 
 /// System instructions for the live voice coaching sessions.
 ///
@@ -12,7 +13,7 @@ class CoachingPrompt {
   /// Build the session instructions: the full master prompt, then a spoken
   /// coaching layer tailored to the chosen [minutes] length.
   static String build({required int minutes}) => '''
-${MasterPrompt.build()}
+${MasterPrompt.build()}${MemoryStore.instance.promptBlock()}
 
 # ============================================================
 # LIVE VOICE COACHING SESSION
