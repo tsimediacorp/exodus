@@ -32,10 +32,14 @@ class MessageBubble extends StatefulWidget {
   /// Called when the user taps "Regenerate" on an assistant message.
   final VoidCallback? onRegenerate;
 
+  /// Called when the user taps "Edit" on their own message.
+  final VoidCallback? onEdit;
+
   const MessageBubble({
     super.key,
     required this.message,
     this.onRegenerate,
+    this.onEdit,
   });
 
   @override
@@ -187,6 +191,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                 onPlay: () =>
                     TtsService.instance.toggle(_ttsKey, message.content),
                 onRegenerate: widget.onRegenerate,
+                onEdit: widget.onEdit,
               ),
             ),
         ],
@@ -201,6 +206,7 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback onCopy;
   final VoidCallback onPlay;
   final VoidCallback? onRegenerate;
+  final VoidCallback? onEdit;
 
   const _ActionBar({
     required this.isAssistant,
@@ -208,6 +214,7 @@ class _ActionBar extends StatelessWidget {
     required this.onCopy,
     required this.onPlay,
     required this.onRegenerate,
+    required this.onEdit,
   });
 
   @override
@@ -216,6 +223,10 @@ class _ActionBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _ActionButton(icon: Icons.copy_rounded, label: 'Copy', onTap: onCopy),
+        if (!isAssistant && onEdit != null) ...[
+          const SizedBox(width: 4),
+          _ActionButton(icon: Icons.edit_rounded, label: 'Edit', onTap: onEdit!),
+        ],
         if (isAssistant) ...[
           const SizedBox(width: 4),
           ValueListenableBuilder<String?>(

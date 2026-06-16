@@ -6,7 +6,8 @@ import 'coaching_session_screen.dart';
 /// Entry screen for voice coaching: pick a session length, then start a live
 /// session. (Saved-session history can layer in here later.)
 class CoachingScreen extends StatefulWidget {
-  const CoachingScreen({super.key});
+  final VoidCallback? onOpenMenu;
+  const CoachingScreen({super.key, this.onOpenMenu});
 
   @override
   State<CoachingScreen> createState() => _CoachingScreenState();
@@ -29,7 +30,11 @@ class _CoachingScreenState extends State<CoachingScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Coaching'),
-        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
+          tooltip: 'Menu',
+          onPressed: widget.onOpenMenu,
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(

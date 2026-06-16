@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import '../services/notification_service.dart';
-import '../theme/exodus_theme.dart';
+import '../services/storage_service.dart';
+import '../widgets/app_drawer.dart';
 import 'chat_screen.dart';
 import 'coaching_screen.dart';
 import 'devotional_screen.dart';
 
-/// Root navigation after the splash. Three tabs: the text "Counsel" chat, the
-/// live "Coaching" voice sessions, and the daily "Devotional". An IndexedStack
-/// keeps each tab's state alive when switching.
+/// Root navigation after the splash. Modes (Counsel / Coaching / Devotional)
+/// live in the left drawer; an IndexedStack keeps each mode's state alive. The
+/// drawer's chats section drives the Counsel conversation list.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -16,15 +17,16 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _index = 0;
+  int _mode = 0;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<ChatScreenState> _chatKey = GlobalKey<ChatScreenState>();
 
-  static const _tabs = [ChatScreen(), CoachingScreen(), DevotionalScreen()];
-  static const int _devotionalTab = 2;
+  static const int _counselMode = 0;
+  static const int _devotionalMode = 2;
 
   @override
   void initState() {
     super.initState();
-    // A tapped morning devotional notification asks us to open that tab.
     NotificationService.instance.openDevotionalRequested
         .addListener(_onOpenDevotional);
   }
@@ -38,51 +40,46 @@ class _HomeShellState extends State<HomeShell> {
 
   void _onOpenDevotional() {
     if (NotificationService.instance.openDevotionalRequested.value && mounted) {
-      setState(() => _index = _devotionalTab);
+      setState(() => _mode = _devotionalMode);
       NotificationService.instance.openDevotionalRequested.value = false;
     }
   }
 
+  void _openMenu() => _scaffoldKey.currentState?.openDrawer();
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _tabs),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: ExodusTheme.obsidian,
-          border: Border(top: BorderSide(color: ExodusTheme.steel, width: 1)),
-        ),
-        child: NavigationBarTheme(
-          data: NavigationBarThemeData(
-            backgroundColor: Colors.transparent,
-            indicatorColor: ExodusTheme.covenantBlue.withValues(alpha: 0.18),
-            labelTextStyle: WidgetStateProperty.all(
-              const TextStyle(fontSize: 12, color: ExodusTheme.ironMist),
-            ),
-          ),
-          child: NavigationBar(
-            height: 64,
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.menu_book_outlined, color: ExodusTheme.ironMist),
-                selectedIcon: Icon(Icons.menu_book, color: ExodusTheme.covenantGlow),
-                label: 'Counsel',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.spatial_audio_off_outlined, color: ExodusTheme.ironMist),
-                selectedIcon: Icon(Icons.spatial_audio_off, color: ExodusTheme.covenantGlow),
-                label: 'Coaching',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.wb_sunny_outlined, color: ExodusTheme.ironMist),
-                selectedIcon: Icon(Icons.wb_sunny, color: ExodusTheme.covenantGlow),
-                label: 'Devotional',
-              ),
-            ],
-          ),
-        ),
+      key: _scaffoldKey,
+      // Refresh the drawer's chat list / current-highlight each time it opens.
+      onDrawerChanged: (isOpen) {
+        if (isOpen) setState(() {});
+      },
+      drawer: AppDrawer(
+        currentMode: _mode,
+        onSelectMode: (i) => setState(() => _mode = i),
+        conversations: StorageService.instance.loadConversations(),
+        currentConversationId: _chatKey.currentState?.currentId,
+        onNewConversation: () {
+          setState(() => _mode = _counselMode);
+          _chatKey.currentState?.newConversation();
+        },
+        onSelectConversation: (id) {
+          setState(() => _mode = _counselMode);
+          _chatKey.currentState?.openConversation(id);
+        },
+        onDeleteConversation: (id) {
+          _chatKey.currentState?.deleteConversationById(id);
+          setState(() {});
+        },
+      ),
+      body: IndexedStack(
+        index: _mode,
+        children: [
+          ChatScreen(key: _chatKey, onOpenMenu: _openMenu),
+          CoachingScreen(onOpenMenu: _openMenu),
+          DevotionalScreen(onOpenMenu: _openMenu),
+        ],
       ),
     );
   }

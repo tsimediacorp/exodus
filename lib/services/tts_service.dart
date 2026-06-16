@@ -21,6 +21,8 @@ class TtsService {
   Future<void> _init() async {
     if (_initialized) return;
     _initialized = true;
+    await _tts.setLanguage('en-GB');
+    await _selectBritishMaleVoice();
     await _tts.setSpeechRate(0.5); // 0.5 ≈ natural pace on iOS/web
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
@@ -28,6 +30,42 @@ class TtsService {
     _tts.setCompletionHandler(() => speakingKey.value = null);
     _tts.setCancelHandler(() => speakingKey.value = null);
     _tts.setErrorHandler((_) => speakingKey.value = null);
+  }
+
+  /// Pick a natural British male voice. On iOS the classic en-GB male voice is
+  /// "Daniel" (with "(Enhanced)"/"(Premium)" variants when downloaded). Falls
+  /// back to any en-GB voice, preferring known male names.
+  Future<void> _selectBritishMaleVoice() async {
+    try {
+      final raw = await _tts.getVoices;
+      if (raw is! List) return;
+      final voices = raw.whereType<Map>().toList();
+      final enGB = voices
+          .where((v) =>
+              (v['locale'] ?? '').toString().toLowerCase().startsWith('en-gb'))
+          .toList();
+      if (enGB.isEmpty) return;
+
+      const malePref = ['daniel', 'arthur', 'oliver', 'george', 'james', 'malcolm'];
+      Map? pick;
+      for (final name in malePref) {
+        for (final v in enGB) {
+          if (v['name'].toString().toLowerCase().contains(name)) {
+            pick = v;
+            break;
+          }
+        }
+        if (pick != null) break;
+      }
+      pick ??= enGB.first;
+      await _tts.setVoice({
+        'name': pick['name'].toString(),
+        'locale': pick['locale'].toString(),
+      });
+    } catch (_) {
+      // Voice list unavailable (some platforms) — en-GB language alone still
+      // gives a British accent.
+    }
   }
 
   /// Speak [text] aloud, tagging it with [key]. If the same key is already
