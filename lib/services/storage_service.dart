@@ -4,6 +4,7 @@ import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/coaching_session.dart';
 import '../models/conversation.dart';
+import '../models/devotional.dart';
 
 /// Persists conversations and MasterPrompt runtime overrides to
 /// shared_preferences (which on iOS is NSUserDefaults — local to the app,
@@ -29,6 +30,8 @@ class StorageService {
   static const _kMaxTokens         = 'exodus.model.maxTokens';
   static const _kActiveProvider    = 'exodus.model.activeProvider';
   static const _kCoachingSessions  = 'exodus.coachingSessions';
+  static const _kDevotionalGoal    = 'exodus.devotional.goal';
+  static const _kDevotionals       = 'exodus.devotional.entries';
 
   Future<void> init() async {
     try {
@@ -146,6 +149,55 @@ class StorageService {
   Future<void> addCoachingSession(CoachingSession session) async {
     final all = loadCoachingSessions()..insert(0, session);
     await saveCoachingSessions(all);
+  }
+
+  // ---------------- Devotionals ----------------
+
+  DevotionalGoal? loadDevotionalGoal() {
+    final raw = _prefs?.getString(_kDevotionalGoal);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return DevotionalGoal.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveDevotionalGoal(DevotionalGoal goal) async {
+    await _prefs?.setString(_kDevotionalGoal, jsonEncode(goal.toJson()));
+  }
+
+  /// All saved devotionals, newest day first.
+  List<Devotional> loadDevotionals() {
+    final raw = _prefs?.getString(_kDevotionals);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => Devotional.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.day.compareTo(a.day));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Devotional? devotionalForDay(DateTime day) {
+    final key = Devotional.keyFor(day);
+    for (final d in loadDevotionals()) {
+      if (d.dayKey == key) return d;
+    }
+    return null;
+  }
+
+  /// Insert or replace the devotional for its day.
+  Future<void> saveDevotional(Devotional devotional) async {
+    final all = loadDevotionals()
+      ..removeWhere((d) => d.dayKey == devotional.dayKey)
+      ..add(devotional);
+    all.sort((a, b) => b.day.compareTo(a.day));
+    await _prefs?.setString(
+        _kDevotionals, jsonEncode(all.map((d) => d.toJson()).toList()));
   }
 
   // ---------------- Prompt overrides ----------------

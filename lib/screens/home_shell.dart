@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import '../services/notification_service.dart';
 import '../theme/exodus_theme.dart';
 import 'chat_screen.dart';
 import 'coaching_screen.dart';
+import 'devotional_screen.dart';
 
-/// Root navigation after the splash. Two tabs: the text "Counsel" chat and
-/// the live "Coaching" voice sessions. An IndexedStack keeps each tab's state
-/// alive when switching.
+/// Root navigation after the splash. Three tabs: the text "Counsel" chat, the
+/// live "Coaching" voice sessions, and the daily "Devotional". An IndexedStack
+/// keeps each tab's state alive when switching.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -16,7 +18,30 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _tabs = [ChatScreen(), CoachingScreen()];
+  static const _tabs = [ChatScreen(), CoachingScreen(), DevotionalScreen()];
+  static const int _devotionalTab = 2;
+
+  @override
+  void initState() {
+    super.initState();
+    // A tapped morning devotional notification asks us to open that tab.
+    NotificationService.instance.openDevotionalRequested
+        .addListener(_onOpenDevotional);
+  }
+
+  @override
+  void dispose() {
+    NotificationService.instance.openDevotionalRequested
+        .removeListener(_onOpenDevotional);
+    super.dispose();
+  }
+
+  void _onOpenDevotional() {
+    if (NotificationService.instance.openDevotionalRequested.value && mounted) {
+      setState(() => _index = _devotionalTab);
+      NotificationService.instance.openDevotionalRequested.value = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +74,11 @@ class _HomeShellState extends State<HomeShell> {
                 icon: Icon(Icons.spatial_audio_off_outlined, color: ExodusTheme.ironMist),
                 selectedIcon: Icon(Icons.spatial_audio_off, color: ExodusTheme.covenantGlow),
                 label: 'Coaching',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.wb_sunny_outlined, color: ExodusTheme.ironMist),
+                selectedIcon: Icon(Icons.wb_sunny, color: ExodusTheme.covenantGlow),
+                label: 'Devotional',
               ),
             ],
           ),
