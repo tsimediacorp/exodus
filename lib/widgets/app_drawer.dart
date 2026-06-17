@@ -15,6 +15,7 @@ class AppDrawer extends StatelessWidget {
   final VoidCallback onNewConversation;
   final ValueChanged<String> onSelectConversation;
   final ValueChanged<String> onDeleteConversation;
+  final VoidCallback onOpenMemory;
 
   const AppDrawer({
     super.key,
@@ -25,6 +26,7 @@ class AppDrawer extends StatelessWidget {
     required this.onNewConversation,
     required this.onSelectConversation,
     required this.onDeleteConversation,
+    required this.onOpenMemory,
   });
 
   static const _modes = [
@@ -60,6 +62,37 @@ class AppDrawer extends StatelessWidget {
                       itemBuilder: (_, i) => _tile(context, sorted[i]),
                     ),
             ),
+            const Divider(color: ExodusTheme.steel, height: 1),
+            _footerTile(
+              context,
+              icon: Icons.psychology_outlined,
+              label: 'Memory',
+              onTap: onOpenMemory,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _footerTile(BuildContext context,
+      {required IconData icon, required String label, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).pop();
+        onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: ExodusTheme.ironMist),
+            const SizedBox(width: 14),
+            Text(label,
+                style: const TextStyle(
+                    color: ExodusTheme.ironMist,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500)),
           ],
         ),
       ),

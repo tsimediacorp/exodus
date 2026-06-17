@@ -5,6 +5,7 @@ import '../widgets/app_drawer.dart';
 import 'chat_screen.dart';
 import 'coaching_screen.dart';
 import 'devotional_screen.dart';
+import 'memory_screen.dart';
 
 /// Root navigation after the splash. Modes (Counsel / Coaching / Devotional)
 /// live in the left drawer; an IndexedStack keeps each mode's state alive. The
@@ -72,6 +73,9 @@ class _HomeShellState extends State<HomeShell> {
           _chatKey.currentState?.deleteConversationById(id);
           setState(() {});
         },
+        onOpenMemory: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const MemoryScreen()),
+        ),
       ),
       body: IndexedStack(
         index: _mode,

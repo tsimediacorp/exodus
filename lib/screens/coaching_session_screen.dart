@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/coaching_session.dart';
+import '../services/memory_service.dart';
 import '../services/realtime_voice_service.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
@@ -38,7 +39,7 @@ class _CoachingSessionScreenState extends State<CoachingSessionScreen> {
   Future<void> _connect() async {
     await _voice.connect(minutes: widget.minutes);
     if (_voice.state.value == VoiceState.error) return;
-    _voice.kickoff();
+    // The greeting is sent automatically once the data channel opens.
     _startTimer();
   }
 
@@ -61,6 +62,10 @@ class _CoachingSessionScreenState extends State<CoachingSessionScreen> {
     await _voice.hangUp();
     _session.endedAt = DateTime.now();
     await StorageService.instance.addCoachingSession(_session);
+    // Distill durable memory from the session (fire-and-forget, best-effort).
+    if (_session.transcript.isNotEmpty) {
+      MemoryService().captureFromCoaching(_session.transcript);
+    }
     if (mounted) Navigator.of(context).pop();
   }
 
