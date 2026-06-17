@@ -56,7 +56,7 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       _error = null;
     });
     try {
-      final d = await _devo.generate(goal: goal.text);
+      final d = await _devo.generate(goal: goal.text, recentRefs: _recentRefs());
       await _storage.saveDevotional(d);
       await _scheduleTomorrow(goal.text);
       if (mounted) setState(() => _today = d);
@@ -69,11 +69,21 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
 
   /// Pre-generate tomorrow's devotional and schedule the morning notification
   /// to carry it (no backend — generated while the app is open).
+  /// Scripture refs used in the most recent devotionals, so the model avoids
+  /// repeating them. Newest first, capped.
+  List<String> _recentRefs() => _storage
+      .loadDevotionals()
+      .map((d) => d.scriptureRef)
+      .where((r) => r.trim().isNotEmpty)
+      .take(10)
+      .toList();
+
   Future<void> _scheduleTomorrow(String goal) async {
     final tomorrow = DateTime.now().add(const Duration(days: 1));
     if (_storage.devotionalForDay(tomorrow) != null) return;
     try {
-      final d = await _devo.generate(goal: goal, forDay: tomorrow);
+      final d = await _devo.generate(
+          goal: goal, forDay: tomorrow, recentRefs: _recentRefs());
       await _storage.saveDevotional(d);
       await NotificationService.instance.scheduleMorning(
         day: tomorrow,

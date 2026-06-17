@@ -20,10 +20,15 @@ class DevotionalService {
   /// Generate the devotional for [forDay] (default today) tied to [goal].
   /// Uses a generous token budget: glm-4.6v is a reasoning model, so it spends
   /// tokens "thinking" before the JSON — too small a cap yields empty content.
-  Future<Devotional> generate({required String goal, DateTime? forDay}) async {
+  Future<Devotional> generate({
+    required String goal,
+    DateTime? forDay,
+    List<String> recentRefs = const [],
+  }) async {
     final day = forDay ?? DateTime.now();
     final raw = await _ai.ask(
-      userMessage: DevotionalPrompt.task(goal: goal, dateLabel: _dateLabel(day)),
+      userMessage: DevotionalPrompt.task(
+          goal: goal, dateLabel: _dateLabel(day), recentRefs: recentRefs),
       history: const <ChatMessage>[],
       maxTokens: 4000,
     );
