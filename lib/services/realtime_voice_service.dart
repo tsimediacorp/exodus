@@ -20,6 +20,7 @@ class RealtimeVoiceService {
   RTCPeerConnection? _pc;
   RTCDataChannel? _dc;
   MediaStream? _localStream;
+  Timer? _connectTimeout;
 
   /// Coarse session state for the UI (the orb, status line).
   final ValueNotifier<VoiceState> state = ValueNotifier(VoiceState.idle);
@@ -62,17 +63,22 @@ class RealtimeVoiceService {
       "EXODUS's live voice is busy right now (rate limit). Give it a few "
       "seconds, then start the session again.";
 
-  /// POST with up to [tries] attempts, backing off on HTTP 429.
+  /// POST with up to [tries] attempts, backing off on HTTP 429. Honors the
+  /// server's Retry-After header when present (OpenAI realtime sends it on
+  /// rate/concurrency limits), otherwise uses linear backoff.
   Future<http.Response> _postRetrying(
     Uri url, {
     required Map<String, String> headers,
     required Object body,
-    int tries = 3,
+    int tries = 4,
   }) async {
     http.Response res = await http.post(url, headers: headers, body: body);
     var attempt = 1;
     while (res.statusCode == 429 && attempt < tries) {
-      await Future.delayed(Duration(milliseconds: 1200 * attempt));
+      final retryAfter = int.tryParse(res.headers['retry-after'] ?? '');
+      final waitMs =
+          (retryAfter != null ? retryAfter * 1000 : 1500 * attempt).clamp(1000, 8000);
+      await Future.delayed(Duration(milliseconds: waitMs));
       res = await http.post(url, headers: headers, body: body);
       attempt++;
     }
@@ -140,10 +146,12 @@ class RealtimeVoiceService {
       _dc = dc;
       dc.onMessage = (RTCDataChannelMessage msg) => _handleEvent(msg.text);
       dc.onDataChannelState = (s) {
-        // Session is fully configured at mint time, so once the events
-        // channel opens we're ready to listen.
+        // The data channel opens asynchronously, AFTER connect() returns. Only
+        // here is it safe to send events — so greet the couple now, not earlier.
         if (s == RTCDataChannelState.RTCDataChannelOpen) {
+          _connectTimeout?.cancel();
           state.value = VoiceState.listening;
+          kickoff();
         }
       };
 
@@ -165,6 +173,17 @@ class RealtimeVoiceService {
       }
       await pc.setRemoteDescription(RTCSessionDescription(sdpRes.body, 'answer'));
       state.value = VoiceState.connected;
+
+      // Surface a failure instead of hanging on "Connecting…" if the data
+      // channel never opens (ICE blocked, no mic permission, network, etc.).
+      _connectTimeout = Timer(const Duration(seconds: 15), () {
+        if (state.value != VoiceState.listening &&
+            state.value != VoiceState.speaking &&
+            state.value != VoiceState.closed) {
+          _fail("Couldn't connect the voice channel — check your internet and "
+              "that microphone access is allowed, then try again.");
+        }
+      });
     } catch (e) {
       _fail('$e');
     }
@@ -228,6 +247,7 @@ class RealtimeVoiceService {
   }
 
   Future<void> hangUp() async {
+    _connectTimeout?.cancel();
     try {
       await _dc?.close();
       _localStream?.getTracks().forEach((t) => t.stop());

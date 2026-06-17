@@ -39,7 +39,7 @@ class _CoachingSessionScreenState extends State<CoachingSessionScreen> {
   Future<void> _connect() async {
     await _voice.connect(minutes: widget.minutes);
     if (_voice.state.value == VoiceState.error) return;
-    _voice.kickoff();
+    // The greeting is sent automatically once the data channel opens.
     _startTimer();
   }
 
