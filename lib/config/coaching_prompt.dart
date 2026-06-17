@@ -49,5 +49,7 @@ HOW TO COACH
   static const String voice = 'verse';
 
   /// Realtime model id.
-  static const String model = 'gpt-realtime';
+  // gpt-realtime-mini: cheaper and more rate-limit headroom than the full
+  // gpt-realtime, which matters on low-tier OpenAI projects (the 429s).
+  static const String model = 'gpt-realtime-mini';
 }

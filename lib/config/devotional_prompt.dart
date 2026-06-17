@@ -8,11 +8,29 @@
 /// contradict doctrine — that lives in master_prompt.dart.
 class DevotionalPrompt {
   /// The task message asking for today's devotional as strict JSON.
-  static String task({required String goal, required String dateLabel}) => '''
+  /// [recentRefs] are scripture references used in recent days — the model must
+  /// pick a DIFFERENT passage so devotionals don't repeat the same verse daily.
+  static String task({
+    required String goal,
+    required String dateLabel,
+    List<String> recentRefs = const [],
+  }) {
+    final avoid = recentRefs.isEmpty
+        ? ''
+        : '''
+
+IMPORTANT — variety: do NOT use any of these recently-used passages (pick a
+genuinely different book/passage of Scripture):
+${recentRefs.map((r) => '- $r').join('\n')}
+''';
+    return '''
 Create a daily devotional for $dateLabel for this young Christian couple,
 tailored to the goal they are working on together:
 
 GOAL: "$goal"
+$avoid
+Choose a fresh passage of Scripture for today — over time the devotionals
+should draw from a wide range of books, not repeat the same verse.
 
 Return ONLY a single valid JSON object — no markdown, no code fences, no text
 before or after. Use exactly these keys, all string values in plain prose
@@ -30,6 +48,7 @@ before or after. Use exactly these keys, all string values in plain prose
 Keep it scripture-first and fully aligned with who you are and what you
 believe (above). Speak to them as a couple.
 ''';
+  }
 
   /// Opening line for the conversational goal-setting flow.
   static String goalIntakeOpener() =>
