@@ -41,3 +41,10 @@ android/app/release
 .env
 .env.*
 !.env.example
+
+# Amplify Gen 2 backend (Node)
+node_modules/
+.amplify/
+amplify_outputs*
+amplifyconfiguration*
+.env.local

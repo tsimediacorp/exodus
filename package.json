@@ -1,0 +1,22 @@
+{
+  "name": "exodus-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Amplify Gen 2 backend for EXODUS Couples-in-Sync (auth, data, server-side counseling).",
+  "scripts": {
+    "deploy:sandbox": "ampx sandbox",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.4.0",
+    "@aws-amplify/backend-cli": "^1.2.5",
+    "aws-cdk-lib": "^2.158.0",
+    "constructs": "^10.3.0",
+    "esbuild": "^0.23.1",
+    "tsx": "^4.17.0",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "aws-amplify": "^6.6.0"
+  }
+}
