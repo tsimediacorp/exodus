@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../config/devotional_fallback.dart';
 import '../config/devotional_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/devotional.dart';
@@ -18,6 +19,12 @@ class DevotionalService {
   String _dateLabel(DateTime d) => '${_months[d.month - 1]} ${d.day}, ${d.year}';
 
   /// Generate the devotional for [forDay] (default today) tied to [goal].
+  ///
+  /// Guaranteed to NEVER throw: it retries the model a few times, and if every
+  /// attempt fails (network down, empty/garbled output, rate limit, etc.) it
+  /// returns a complete built-in fallback devotional. The Devotional tab and
+  /// the morning notification therefore always have real content.
+  ///
   /// Uses a generous token budget: glm-4.6v is a reasoning model, so it spends
   /// tokens "thinking" before the JSON — too small a cap yields empty content.
   Future<Devotional> generate({
@@ -26,17 +33,36 @@ class DevotionalService {
     List<String> recentRefs = const [],
   }) async {
     final day = forDay ?? DateTime.now();
-    final raw = await _ai.ask(
-      userMessage: DevotionalPrompt.task(
-          goal: goal, dateLabel: _dateLabel(day), recentRefs: recentRefs),
-      history: const <ChatMessage>[],
-      maxTokens: 4000,
-    );
-    if (raw.trim().isEmpty) {
-      throw Exception(
-          "EXODUS couldn't finish today's devotional (the model hit its limit). Tap Try again.");
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final raw = await _ai.ask(
+          userMessage: DevotionalPrompt.task(
+              goal: goal, dateLabel: _dateLabel(day), recentRefs: recentRefs),
+          history: const <ChatMessage>[],
+          maxTokens: 4000,
+        );
+        final json = _extractJson(raw);
+        final devo = Devotional.fromGenerated(day: day, json: json, goal: goal);
+        // Accept only if we got real content; otherwise retry / fall back.
+        if (devo.reflection.trim().isNotEmpty &&
+            devo.scriptureText.trim().isNotEmpty) {
+          return devo;
+        }
+      } catch (_) {
+        // transient — try again, then fall back
+      }
+      if (attempt < 2) {
+        await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
+      }
     }
-    return Devotional.fromGenerated(day: day, json: _extractJson(raw), goal: goal);
+    return _fallback(day, goal);
+  }
+
+  /// A complete, on-theme devotional that always works — used when the model
+  /// can't produce one.
+  Devotional _fallback(DateTime day, String goal) {
+    final f = DevotionalFallback.forDay(day);
+    return Devotional.fromGenerated(day: day, json: f, goal: goal);
   }
 
   /// Distill a free-form goal-setting conversation into one clear goal line.
