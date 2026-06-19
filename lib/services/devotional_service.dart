@@ -33,13 +33,15 @@ class DevotionalService {
     List<String> recentRefs = const [],
   }) async {
     final day = forDay ?? DateTime.now();
-    for (var attempt = 0; attempt < 3; attempt++) {
+    const maxAttempts = 2;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         final raw = await _ai.ask(
           userMessage: DevotionalPrompt.task(
               goal: goal, dateLabel: _dateLabel(day), recentRefs: recentRefs),
           history: const <ChatMessage>[],
           maxTokens: 4000,
+          timeout: const Duration(seconds: 30),
         );
         final json = _extractJson(raw);
         final devo = Devotional.fromGenerated(day: day, json: json, goal: goal);
@@ -49,10 +51,10 @@ class DevotionalService {
           return devo;
         }
       } catch (_) {
-        // transient — try again, then fall back
+        // transient (timeout, network, parse) — try again, then fall back
       }
-      if (attempt < 2) {
-        await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
+      if (attempt < maxAttempts - 1) {
+        await Future.delayed(const Duration(milliseconds: 600));
       }
     }
     return _fallback(day, goal);

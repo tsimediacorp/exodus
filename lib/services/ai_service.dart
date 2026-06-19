@@ -93,6 +93,7 @@ class AiService {
     required List<ChatMessage> history,
     List<String> images = const [],
     int? maxTokens,
+    Duration timeout = const Duration(seconds: 60),
   }) async {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -102,19 +103,24 @@ class AiService {
           'No API key configured for "$provider". Check the .env file.');
     }
 
-    final response = await _client.post(
-      Uri.parse(config.endpoint),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${config.apiKey}',
-        if (provider == 'openrouter') ...{
-          'HTTP-Referer': 'https://exodus.app',
-          'X-Title': 'EXODUS',
-        },
-      },
-      body: jsonEncode(_buildBody(userMessage, history,
-          stream: false, images: images, maxTokens: maxTokens)),
-    );
+    // Hard timeout so a stalled request can never hang the caller forever
+    // (e.g. the devotional spinner). On timeout this throws and the caller
+    // can retry / fall back.
+    final response = await _client
+        .post(
+          Uri.parse(config.endpoint),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${config.apiKey}',
+            if (provider == 'openrouter') ...{
+              'HTTP-Referer': 'https://exodus.app',
+              'X-Title': 'EXODUS',
+            },
+          },
+          body: jsonEncode(_buildBody(userMessage, history,
+              stream: false, images: images, maxTokens: maxTokens)),
+        )
+        .timeout(timeout);
 
     if (response.statusCode != 200) {
       throw Exception(
