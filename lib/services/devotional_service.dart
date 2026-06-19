@@ -49,17 +49,33 @@ class DevotionalService {
     return line.trim().replaceAll(RegExp(r'^["“]|["”]$'), '').trim();
   }
 
-  /// Pull the first JSON object out of a model reply, tolerating stray text or
-  /// code fences. Falls back to dropping the raw text into the reflection.
+  /// Pull the devotional fields out of a model reply, tolerating stray text or
+  /// code fences. If strict JSON parsing fails (e.g. an unescaped quote inside
+  /// a value), fall back to per-field regex extraction so the devotional still
+  /// renders cleanly instead of dumping raw text into the reflection.
   Map<String, dynamic> _extractJson(String s) {
     final start = s.indexOf('{');
     final end = s.lastIndexOf('}');
     if (start >= 0 && end > start) {
       try {
         return jsonDecode(s.substring(start, end + 1)) as Map<String, dynamic>;
-      } catch (_) {/* fall through */}
+      } catch (_) {/* fall through to field extraction */}
     }
-    return {'reflection': s.trim()};
+    const keys = [
+      'title', 'scriptureRef', 'scriptureText', 'reflection', 'prayer', 'action'
+    ];
+    final fields = <String, dynamic>{};
+    for (final key in keys) {
+      final m = RegExp('"$key"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"').firstMatch(s);
+      if (m != null) {
+        fields[key] = m
+            .group(1)!
+            .replaceAll(r'\"', '"')
+            .replaceAll(r'\n', '\n')
+            .trim();
+      }
+    }
+    return fields.isNotEmpty ? fields : {'reflection': s.trim()};
   }
 
   void dispose() => _ai.dispose();
