@@ -183,4 +183,79 @@ class TogetherService {
     ''', variables: {'cid': coupleId, 'text': text, 'vis': shared ? 'shared' : 'private'});
     return (data['askExodus'] as String?) ?? '';
   }
+
+  // ---------------- Daily quiz / alignment ----------------
+
+  static String dayKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  /// Stable per-couple, per-day id used for the quiz round + alignment record.
+  static String roundId(String coupleId, DateTime day) => '$coupleId#${dayKey(day)}';
+
+  List<String> memberIds(Couple c) =>
+      [c.member1Id, if (c.member2Id != null && c.member2Id!.isNotEmpty) c.member2Id!];
+
+  Future<void> submitAnswer({
+    required String roundId,
+    required String answer,
+    required List<String> members,
+  }) async {
+    await _mutate('''
+      mutation Ans(\$rid: ID!, \$author: String!, \$ans: String!, \$members: [String]!) {
+        createQuizAnswer(input: {roundId: \$rid, authorId: \$author, answer: \$ans, members: \$members}) { id }
+      }
+    ''', variables: {
+      'rid': roundId,
+      'author': (await currentUserId()) ?? '',
+      'ans': answer,
+      'members': members,
+    });
+  }
+
+  /// Map of authorId -> answer for the day's round.
+  Future<Map<String, String>> answers(String roundId) async {
+    final data = await _gql('''
+      query Ans(\$rid: ID!) {
+        listQuizAnswers(filter: {roundId: {eq: \$rid}}, limit: 10) {
+          items { authorId answer }
+        }
+      }
+    ''', variables: {'rid': roundId});
+    final items = (data['listQuizAnswers']?['items'] as List?) ?? [];
+    return {
+      for (final e in items)
+        (e['authorId'] ?? '') as String: (e['answer'] ?? '') as String,
+    };
+  }
+
+  /// Returns {score, recap} once both have answered, else null.
+  Future<Map<String, dynamic>?> scoreDay({
+    required String coupleId,
+    required String roundId,
+    required DateTime day,
+    required String prompt,
+  }) async {
+    final data = await _mutate('''
+      mutation Score(\$cid: String!, \$rid: String!, \$day: String!, \$prompt: String!) {
+        scoreDay(coupleId: \$cid, roundId: \$rid, day: \$day, prompt: \$prompt)
+      }
+    ''', variables: {'cid': coupleId, 'rid': roundId, 'day': dayKey(day), 'prompt': prompt});
+    final raw = (data['scoreDay'] as String?) ?? '';
+    if (raw.isEmpty) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> alignment(String roundId) async {
+    final data = await _gql('''
+      query Align(\$id: ID!) {
+        getDailyAlignment(id: \$id) { score recap }
+      }
+    ''', variables: {'id': roundId});
+    final a = data['getDailyAlignment'];
+    return a == null ? null : (a as Map<String, dynamic>);
+  }
 }

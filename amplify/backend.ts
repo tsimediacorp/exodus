@@ -3,6 +3,7 @@ import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { askExodus } from './functions/askExodus/resource';
 import { redeemInvite } from './functions/redeemInvite/resource';
+import { scoreDay } from './functions/scoreDay/resource';
 
 /**
  * EXODUS Couples-in-Sync backend (Amplify Gen 2).
@@ -13,4 +14,5 @@ defineBackend({
   data,
   askExodus,
   redeemInvite,
+  scoreDay,
 });

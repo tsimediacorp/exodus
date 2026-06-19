@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/quiz_bank.dart';
 import '../services/amplify_service.dart';
 import '../services/together_service.dart';
 import '../theme/exodus_theme.dart';
@@ -358,7 +359,7 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   List<TogetherMessage> _all = [];
-  bool _shared = true; // shared couples space vs. private confidant
+  int _tab = 0; // 0 = shared space, 1 = private confidant, 2 = daily
   bool _busy = false;
   bool _loading = true;
 
@@ -379,14 +380,14 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
   }
 
   List<TogetherMessage> get _visible =>
-      _all.where((m) => m.visibility == (_shared ? 'shared' : 'private')).toList();
+      _all.where((m) => m.visibility == (_tab == 0 ? 'shared' : 'private')).toList();
 
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _busy) return;
     setState(() { _busy = true; _input.clear(); });
     try {
-      await widget.svc.ask(coupleId: widget.couple.id, text: text, shared: _shared);
+      await widget.svc.ask(coupleId: widget.couple.id, text: text, shared: _tab == 0);
       await _refresh();
     } on Exception catch (e) {
       if (mounted) {
@@ -409,6 +410,14 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_tab == 2) {
+      return Column(
+        children: [
+          _modeToggle(),
+          Expanded(child: _DailyView(svc: widget.svc, couple: widget.couple, userId: widget.userId)),
+        ],
+      );
+    }
     return Column(
       children: [
         _modeToggle(),
@@ -436,19 +445,21 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Row(
         children: [
-          _seg('Shared space', true),
+          _seg('Shared', 0),
           const SizedBox(width: 8),
-          _seg('Private', false),
+          _seg('Private', 1),
+          const SizedBox(width: 8),
+          _seg('Daily', 2),
         ],
       ),
     );
   }
 
-  Widget _seg(String label, bool sharedVal) {
-    final on = _shared == sharedVal;
+  Widget _seg(String label, int tabVal) {
+    final on = _tab == tabVal;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _shared = sharedVal),
+        onTap: () => setState(() => _tab = tabVal),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           alignment: Alignment.center,
@@ -528,7 +539,7 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
               maxLines: 4,
               style: const TextStyle(color: ExodusTheme.porcelain),
               decoration: InputDecoration(
-                hintText: _shared ? 'Share with both of you…' : 'Private to you & EXODUS…',
+                hintText: _tab == 0 ? 'Share with both of you…' : 'Private to you & EXODUS…',
               ),
             ),
           ),
@@ -540,6 +551,202 @@ class _CoupleChatViewState extends State<_CoupleChatView> {
                     height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.arrow_upward, color: ExodusTheme.covenantGlow),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ======================= Daily quiz + alignment =======================
+
+class _DailyView extends StatefulWidget {
+  final TogetherService svc;
+  final Couple couple;
+  final String userId;
+  const _DailyView({required this.svc, required this.couple, required this.userId});
+
+  @override
+  State<_DailyView> createState() => _DailyViewState();
+}
+
+class _DailyViewState extends State<_DailyView> {
+  final _answer = TextEditingController();
+  late final DateTime _day;
+  late final String _roundId;
+  late final String _question;
+
+  Map<String, String> _answers = {};
+  Map<String, dynamic>? _alignment;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _day = DateTime.now();
+    _roundId = TogetherService.roundId(widget.couple.id, _day);
+    _question = QuizBank.forDay(_day);
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final ans = await widget.svc.answers(_roundId);
+      final align = await widget.svc.alignment(_roundId);
+      if (mounted) setState(() { _answers = ans; _alignment = align; _loading = false; });
+    } on Exception {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  bool get _iAnswered => _answers.containsKey(widget.userId);
+  bool get _bothAnswered => _answers.length >= 2;
+
+  Future<void> _submit() async {
+    final text = _answer.text.trim();
+    if (text.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.svc.submitAnswer(
+        roundId: _roundId,
+        answer: text,
+        members: widget.svc.memberIds(widget.couple),
+      );
+      _answer.clear();
+      await _load();
+    } on Exception catch (e) {
+      _toast(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reveal() async {
+    setState(() => _busy = true);
+    try {
+      final r = await widget.svc.scoreDay(
+        coupleId: widget.couple.id, roundId: _roundId, day: _day, prompt: _question);
+      if (mounted) setState(() => _alignment = r);
+    } on Exception catch (e) {
+      _toast(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(Object e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: ExodusTheme.brass));
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text("TODAY'S QUESTION",
+              style: TextStyle(
+                  color: ExodusTheme.ironMist, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Text(_question,
+              style: const TextStyle(
+                  color: ExodusTheme.porcelain, fontSize: 20, fontWeight: FontWeight.w600, height: 1.3)),
+          const SizedBox(height: 20),
+          if (!_iAnswered) ...[
+            TextField(
+              controller: _answer,
+              minLines: 2,
+              maxLines: 5,
+              style: const TextStyle(color: ExodusTheme.porcelain),
+              decoration: const InputDecoration(hintText: 'Your answer…'),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: _busy ? null : _submit,
+              style: FilledButton.styleFrom(
+                  backgroundColor: ExodusTheme.covenantBlue,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+              child: const Text('Submit my answer'),
+            ),
+          ] else ...[
+            _card('You answered', _answers[widget.userId] ?? ''),
+            const SizedBox(height: 12),
+            if (_bothAnswered)
+              _card('Your spouse answered',
+                  _answers.entries.firstWhere((e) => e.key != widget.userId).value)
+            else
+              const Text('Waiting for your spouse to answer…',
+                  style: TextStyle(color: ExodusTheme.ironMist, fontSize: 14)),
+          ],
+          const SizedBox(height: 20),
+          if (_alignment != null)
+            _alignmentCard(_alignment!)
+          else if (_bothAnswered)
+            FilledButton.icon(
+              onPressed: _busy ? null : _reveal,
+              style: FilledButton.styleFrom(
+                  backgroundColor: ExodusTheme.brass,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+              icon: const Icon(Icons.favorite, color: ExodusTheme.obsidian, size: 18),
+              label: const Text('See how aligned we are',
+                  style: TextStyle(color: ExodusTheme.obsidian, fontWeight: FontWeight.w700)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(String label, String body) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: ExodusTheme.midnight,
+          border: Border.all(color: ExodusTheme.steel),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label.toUpperCase(),
+                style: const TextStyle(
+                    color: ExodusTheme.ironMist, fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(body, style: const TextStyle(color: ExodusTheme.porcelain, fontSize: 15, height: 1.4)),
+          ],
+        ),
+      );
+
+  Widget _alignmentCard(Map<String, dynamic> a) {
+    final score = (a['score'] as num?)?.toInt() ?? 0;
+    final recap = (a['recap'] as String?) ?? '';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+            colors: [ExodusTheme.covenantBlue, Color(0xFF2D5BC8)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          const Text('ALIGNMENT TODAY',
+              style: TextStyle(
+                  color: ExodusTheme.porcelain, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Text('$score%',
+              style: const TextStyle(
+                  color: ExodusTheme.porcelain, fontSize: 48, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text(recap,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: ExodusTheme.porcelain, fontSize: 14, height: 1.5)),
         ],
       ),
     );
