@@ -1,5 +1,6 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 import { askExodus } from '../functions/askExodus/resource';
+import { redeemInvite } from '../functions/redeemInvite/resource';
 
 /**
  * Confidentiality model:
@@ -84,6 +85,13 @@ const schema = a.schema({
     .returns(a.string())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(askExodus)),
+
+  redeemInvite: a
+    .mutation()
+    .arguments({ inviteCode: a.string().required() })
+    .returns(a.string()) // coupleId, or '' if invalid
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(redeemInvite)),
 });
 
 export type Schema = ClientSchema<typeof schema>;

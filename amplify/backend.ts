@@ -2,6 +2,7 @@ import { defineBackend } from '@aws-amplify/backend';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { askExodus } from './functions/askExodus/resource';
+import { redeemInvite } from './functions/redeemInvite/resource';
 
 /**
  * EXODUS Couples-in-Sync backend (Amplify Gen 2).
@@ -11,4 +12,5 @@ defineBackend({
   auth,
   data,
   askExodus,
+  redeemInvite,
 });

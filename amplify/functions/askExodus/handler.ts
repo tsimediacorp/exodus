@@ -34,17 +34,32 @@ type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export const handler: Schema['askExodus']['functionHandler'] = async (event) => {
   const { coupleId, text, visibility } = event.arguments;
+  const isShared = visibility === 'shared';
   const callerId = (event.identity as { sub?: string } | undefined)?.sub ?? 'unknown';
 
-  // Pull the couple's recent messages server-side (function has elevated access).
+  // Who can read messages in this turn: shared -> both partners; private -> caller.
+  const { data: couple } = await client.models.Couple.get({ id: coupleId });
+  const bothMembers = couple?.members?.filter((m): m is string => !!m) ?? [callerId];
+  const audience = isShared ? bothMembers : [callerId];
+
+  // Prior context (fetched BEFORE we persist this turn, to avoid duplication).
   const { data: messages } = await client.models.Message.list({
     filter: { coupleId: { eq: coupleId } },
     limit: 100,
   });
-
   const ordered = [...(messages ?? [])].sort((a, b) =>
     (a.createdAt ?? '').localeCompare(b.createdAt ?? ''),
   );
+
+  // Persist the partner's message.
+  await client.models.Message.create({
+    coupleId,
+    authorId: callerId,
+    role: 'user',
+    text,
+    visibility: isShared ? 'shared' : 'private',
+    members: audience,
+  });
 
   // Label context so the model knows what is shared vs. each partner's private.
   const context: Msg[] = ordered.map((m) => {
@@ -89,18 +104,14 @@ export const handler: Schema['askExodus']['functionHandler'] = async (event) => 
   };
   const reply = data.choices?.[0]?.message?.content ?? '';
 
-  // Persist EXODUS's reply with the same visibility/audience as the prompt.
-  const members =
-    visibility === 'shared'
-      ? (ordered.find((m) => m.visibility === 'shared')?.members ?? [callerId])
-      : [callerId];
+  // Persist EXODUS's reply with the same audience as the prompt.
   await client.models.Message.create({
     coupleId,
     authorId: 'exodus',
     role: 'exodus',
     text: reply,
-    visibility: visibility === 'shared' ? 'shared' : 'private',
-    members,
+    visibility: isShared ? 'shared' : 'private',
+    members: audience,
   });
 
   return reply;
