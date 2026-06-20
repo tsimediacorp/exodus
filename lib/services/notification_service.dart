@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -22,6 +23,14 @@ class NotificationService {
   Future<void> init() async {
     if (_ready) return;
     tzdata.initializeTimeZones();
+    // Set the device's actual timezone so a "7am" daily notification fires at
+    // 7am LOCAL (without this, tz.local defaults to UTC).
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name));
+    } catch (_) {
+      // Fall back to UTC if the platform can't report a timezone.
+    }
     const ios = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -51,6 +60,44 @@ class NotificationService {
     }
     return false;
   }
+
+  /// Fixed id for the repeating daily devotional reminder.
+  static const int _dailyId = 1001;
+
+  /// Schedule a RECURRING daily devotional reminder at [hour]:00 local that
+  /// repeats every day on its own — it does NOT depend on the app being opened
+  /// each day. Re-calling replaces the existing one (same id), so it's safe to
+  /// call on every app launch / Devotional tab open.
+  Future<void> scheduleDailyDevotional({int hour = 7}) async {
+    if (!_ready) return;
+    final now = tz.TZDateTime.now(tz.local);
+    var first = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour);
+    if (!first.isAfter(now)) first = first.add(const Duration(days: 1));
+    await _plugin.zonedSchedule(
+      _dailyId,
+      'Your daily devotional',
+      "Today's devotional is ready — open EXODUS to read it together.",
+      first,
+      const NotificationDetails(
+        iOS: DarwinNotificationDetails(),
+        android: AndroidNotificationDetails(
+          'devotional',
+          'Daily Devotional',
+          channelDescription: 'Your morning devotional from EXODUS',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      // Repeat every day at the same local time.
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+
+  /// Cancel the recurring daily devotional reminder.
+  Future<void> cancelDailyDevotional() => _plugin.cancel(_dailyId);
 
   /// Schedule a one-shot morning notification for [day] at [hour]:00 local.
   /// Using TZDateTime.from on a local wall-clock DateTime fires at the correct

@@ -41,6 +41,12 @@ Future<void> main() async {
 
     try {
       await NotificationService.instance.init();
+      // Re-arm the recurring daily devotional reminder on every launch, as long
+      // as the user has set a devotional goal — so it keeps firing daily even
+      // if they don't open the Devotional tab.
+      if (StorageService.instance.loadDevotionalGoal() != null) {
+        await NotificationService.instance.scheduleDailyDevotional();
+      }
     } catch (_) {
       // Notifications are best-effort; the app still works without them.
     }

@@ -44,8 +44,19 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       _goal = _storage.loadDevotionalGoal();
       _today = _storage.devotionalForDay(DateTime.now());
     });
-    // If we have a goal but no devotional for today yet, make one.
-    if (_goal != null && _today == null) _ensureToday();
+    if (_goal != null) {
+      // Keep the recurring morning reminder alive on every open — independent
+      // of whether today's devotional is already generated.
+      _ensureDailyReminder();
+      if (_today == null) _ensureToday();
+    }
+  }
+
+  /// Ensure permission + the repeating daily devotional notification are set.
+  Future<void> _ensureDailyReminder() async {
+    await NotificationService.instance.requestPermission();
+    await NotificationService.instance
+        .scheduleDailyDevotional(hour: _kMorningHour);
   }
 
   Future<void> _ensureToday() async {
@@ -78,6 +89,9 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       .take(10)
       .toList();
 
+  /// Pre-generate tomorrow's devotional so the morning open is instant. The
+  /// reminder notification itself is a separate recurring schedule (see
+  /// _ensureDailyReminder), so it fires daily regardless of this.
   Future<void> _scheduleTomorrow(String goal) async {
     final tomorrow = DateTime.now().add(const Duration(days: 1));
     if (_storage.devotionalForDay(tomorrow) != null) return;
@@ -85,14 +99,6 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       final d = await _devo.generate(
           goal: goal, forDay: tomorrow, recentRefs: _recentRefs());
       await _storage.saveDevotional(d);
-      await NotificationService.instance.scheduleMorning(
-        day: tomorrow,
-        hour: _kMorningHour,
-        title: d.title.isEmpty ? "Today's Devotional" : d.title,
-        body: d.scriptureRef.isEmpty
-            ? 'Your devotional is ready — tap to read.'
-            : '${d.scriptureRef} · tap to read today\'s devotional.',
-      );
     } catch (_) {
       // Tomorrow can still be generated on next open; don't block today.
     }
