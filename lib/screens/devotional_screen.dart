@@ -62,17 +62,22 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
   Future<void> _ensureToday() async {
     final goal = _goal;
     if (goal == null || _busy) return;
+    // Show a real devotional INSTANTLY (no spinner, never blank) — then quietly
+    // upgrade to a fresh AI-generated one if/when it arrives.
     setState(() {
       _busy = true;
       _error = null;
+      _today ??= _devo.fallbackFor(DateTime.now(), goal.text);
     });
     try {
       final d = await _devo.generate(goal: goal.text, recentRefs: _recentRefs());
       await _storage.saveDevotional(d);
       await _scheduleTomorrow(goal.text);
       if (mounted) setState(() => _today = d);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+    } catch (_) {
+      // generate() never throws, but if persistence hiccups, keep the
+      // instantly-shown devotional and persist it so today stays stable.
+      if (_today != null) await _storage.saveDevotional(_today!);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

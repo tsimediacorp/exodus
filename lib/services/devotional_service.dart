@@ -57,12 +57,12 @@ class DevotionalService {
         await Future.delayed(const Duration(milliseconds: 600));
       }
     }
-    return _fallback(day, goal);
+    return fallbackFor(day, goal);
   }
 
   /// A complete, on-theme devotional that always works — used when the model
-  /// can't produce one.
-  Devotional _fallback(DateTime day, String goal) {
+  /// can't produce one, and to show instantly while the AI one generates.
+  Devotional fallbackFor(DateTime day, String goal) {
     final f = DevotionalFallback.forDay(day);
     return Devotional.fromGenerated(day: day, json: f, goal: goal);
   }
