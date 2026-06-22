@@ -520,9 +520,19 @@ class ChatScreenState extends State<ChatScreen> {
           onEdit: msg.sender == Sender.user && !_sending
               ? () => _editMessage(msg)
               : null,
+          onDelete: !_sending ? () => _deleteMessage(msg) : null,
         );
       },
     );
+  }
+
+  /// Delete a single message (user or assistant) from the conversation.
+  void _deleteMessage(ChatMessage msg) {
+    final conv = _current;
+    if (conv == null || _sending) return;
+    setState(() => conv.messages.remove(msg));
+    conv.updatedAt = DateTime.now();
+    _persist();
   }
 
   Widget _buildInputBar() {
