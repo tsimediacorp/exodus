@@ -36,8 +36,7 @@ class AiService {
           'No API key configured for "$provider". Check the .env file.');
     }
 
-    final request = http.Request('POST', Uri.parse(config.endpoint));
-    request.headers.addAll({
+    final headers = {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
       'Authorization': 'Bearer ${config.apiKey}',
@@ -45,64 +44,64 @@ class AiService {
         'HTTP-Referer': 'https://exodus.app',
         'X-Title': 'EXODUS',
       },
-    });
-    request.body =
+    };
+    final body =
         jsonEncode(_buildBody(userMessage, history, stream: true, images: images));
 
-    // Retry the connection on transient network/TLS errors (e.g. a dropped
-    // handshake from a weak signal) — but only before any tokens have streamed,
-    // so we never duplicate output. A fresh Request is needed per attempt.
-    http.StreamedResponse response;
+    // Resilient streaming: retry transient failures (dropped handshake, socket
+    // close, mid-receive "Connection closed while receiving data", timeout) as
+    // long as NO tokens have been produced yet — so output is never duplicated.
+    // If a drop happens AFTER text has started, keep the partial reply and end
+    // gracefully rather than failing the whole message.
+    var yielded = false;
     var attempt = 0;
     while (true) {
       try {
-        final attemptReq = http.Request('POST', Uri.parse(config.endpoint))
-          ..headers.addAll(request.headers)
-          ..body = request.body;
-        response = await _client.send(attemptReq).timeout(const Duration(seconds: 45));
-        break;
+        final request = http.Request('POST', Uri.parse(config.endpoint))
+          ..headers.addAll(headers)
+          ..body = body;
+        final response =
+            await _client.send(request).timeout(const Duration(seconds: 45));
+        if (response.statusCode != 200) {
+          final errBody = await response.stream.bytesToString();
+          throw Exception('AI request failed (${response.statusCode}): $errBody');
+        }
+
+        final lines = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter());
+
+        await for (final line in lines) {
+          if (!line.startsWith('data:')) continue;
+          final payload = line.substring(5).trim();
+          if (payload.isEmpty) continue;
+          if (payload == '[DONE]') return;
+          try {
+            final json = jsonDecode(payload) as Map<String, dynamic>;
+            final choices = json['choices'] as List<dynamic>?;
+            if (choices == null || choices.isEmpty) continue;
+            final choice = choices[0] as Map<String, dynamic>;
+            final finishReason = choice['finish_reason'] as String?;
+            if (finishReason != null) lastFinishReason = finishReason;
+            final delta = choice['delta'] as Map<String, dynamic>?;
+            final content = delta?['content'] as String?;
+            if (content != null && content.isNotEmpty) {
+              yielded = true;
+              yield content;
+            }
+          } catch (_) {
+            // Keepalive/comment lines or non-JSON pings — ignore.
+          }
+        }
+        return; // stream completed
       } on Exception catch (e) {
+        if (yielded) return; // partial reply already shown — keep it.
         if (attempt < 2 && _isTransient(e)) {
           attempt++;
           await Future.delayed(Duration(milliseconds: 700 * attempt));
           continue;
         }
         rethrow;
-      }
-    }
-
-    if (response.statusCode != 200) {
-      final body = await response.stream.bytesToString();
-      throw Exception('AI request failed (${response.statusCode}): $body');
-    }
-
-    final lines = response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
-
-    await for (final line in lines) {
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty) continue;
-      if (payload == '[DONE]') break;
-
-      try {
-        final json = jsonDecode(payload) as Map<String, dynamic>;
-        final choices = json['choices'] as List<dynamic>?;
-        if (choices == null || choices.isEmpty) continue;
-        final choice = choices[0] as Map<String, dynamic>;
-
-        final finishReason = choice['finish_reason'] as String?;
-        if (finishReason != null) lastFinishReason = finishReason;
-
-        final delta = choice['delta'] as Map<String, dynamic>?;
-        final content = delta?['content'] as String?;
-        if (content != null && content.isNotEmpty) {
-          yield content;
-        }
-      } catch (_) {
-        // Some providers send keepalive/comment lines or non-JSON pings.
-        // Ignore anything we can't parse rather than killing the stream.
       }
     }
   }
