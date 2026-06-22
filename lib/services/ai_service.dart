@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../config/master_prompt.dart';
 import '../config/api_keys.dart';
@@ -48,7 +49,27 @@ class AiService {
     request.body =
         jsonEncode(_buildBody(userMessage, history, stream: true, images: images));
 
-    final response = await _client.send(request);
+    // Retry the connection on transient network/TLS errors (e.g. a dropped
+    // handshake from a weak signal) — but only before any tokens have streamed,
+    // so we never duplicate output. A fresh Request is needed per attempt.
+    http.StreamedResponse response;
+    var attempt = 0;
+    while (true) {
+      try {
+        final attemptReq = http.Request('POST', Uri.parse(config.endpoint))
+          ..headers.addAll(request.headers)
+          ..body = request.body;
+        response = await _client.send(attemptReq).timeout(const Duration(seconds: 45));
+        break;
+      } on Exception catch (e) {
+        if (attempt < 2 && _isTransient(e)) {
+          attempt++;
+          await Future.delayed(Duration(milliseconds: 700 * attempt));
+          continue;
+        }
+        rethrow;
+      }
+    }
 
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
@@ -86,6 +107,14 @@ class AiService {
     }
   }
 
+  /// Transient errors worth retrying: dropped TLS handshakes, socket drops,
+  /// timeouts, and the http client's generic connection failures.
+  static bool _isTransient(Object e) =>
+      e is SocketException ||
+      e is HandshakeException ||
+      e is TimeoutException ||
+      e is http.ClientException;
+
   /// Non-streaming fallback. Kept for cases where the caller wants the
   /// finished string in one await.
   Future<String> ask({
@@ -103,24 +132,35 @@ class AiService {
           'No API key configured for "$provider". Check the .env file.');
     }
 
-    // Hard timeout so a stalled request can never hang the caller forever
-    // (e.g. the devotional spinner). On timeout this throws and the caller
-    // can retry / fall back.
-    final response = await _client
-        .post(
-          Uri.parse(config.endpoint),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ${config.apiKey}',
-            if (provider == 'openrouter') ...{
-              'HTTP-Referer': 'https://exodus.app',
-              'X-Title': 'EXODUS',
-            },
-          },
-          body: jsonEncode(_buildBody(userMessage, history,
-              stream: false, images: images, maxTokens: maxTokens)),
-        )
-        .timeout(timeout);
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ${config.apiKey}',
+      if (provider == 'openrouter') ...{
+        'HTTP-Referer': 'https://exodus.app',
+        'X-Title': 'EXODUS',
+      },
+    };
+    final body = jsonEncode(_buildBody(userMessage, history,
+        stream: false, images: images, maxTokens: maxTokens));
+
+    // Hard timeout (no infinite hang) + retry on transient network/TLS errors.
+    http.Response response;
+    var attempt = 0;
+    while (true) {
+      try {
+        response = await _client
+            .post(Uri.parse(config.endpoint), headers: headers, body: body)
+            .timeout(timeout);
+        break;
+      } on Exception catch (e) {
+        if (attempt < 2 && _isTransient(e)) {
+          attempt++;
+          await Future.delayed(Duration(milliseconds: 700 * attempt));
+          continue;
+        }
+        rethrow;
+      }
+    }
 
     if (response.statusCode != 200) {
       throw Exception(
