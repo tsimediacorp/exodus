@@ -37,6 +37,9 @@ class ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   StreamSubscription<String>? _activeStream;
 
+  /// Whether to show the "jump to latest" arrow (user has scrolled up).
+  bool _showScrollDown = false;
+
   /// Images staged for the next message, as data URLs ("data:image/...;base64,").
   final List<String> _pendingImages = [];
 
@@ -55,6 +58,7 @@ class ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     _conversations = _storage.loadConversations();
     final id = _storage.getCurrentConversationId();
     if (id != null) {
@@ -64,6 +68,14 @@ class ChatScreenState extends State<ChatScreen> {
     if (_messages.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
+  }
+
+  /// Show the jump-to-latest arrow once the user has scrolled up from the end.
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final show =
+        _scroll.position.maxScrollExtent - _scroll.position.pixels > 240;
+    if (show != _showScrollDown) setState(() => _showScrollDown = show);
   }
 
   @override
@@ -503,6 +515,38 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessages() {
+    return Stack(
+      children: [
+        _buildMessageList(),
+        if (_showScrollDown)
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Material(
+                color: ExodusTheme.midnight,
+                shape: const CircleBorder(
+                  side: BorderSide(color: ExodusTheme.steel),
+                ),
+                elevation: 4,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _scrollToEnd,
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color: ExodusTheme.covenantGlow, size: 26),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMessageList() {
     return ListView.builder(
       controller: _scroll,
       padding: const EdgeInsets.only(top: 8, bottom: 12),
