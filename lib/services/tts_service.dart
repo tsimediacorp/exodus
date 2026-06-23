@@ -21,13 +21,9 @@ class TtsService {
   Future<void> _init() async {
     if (_initialized) return;
     _initialized = true;
-    // Let an utterance play through fully — reduces the choppy starts/stops
-    // some iOS voices have when speak() is fired without awaiting completion.
-    await _tts.awaitSpeakCompletion(true);
     await _tts.setLanguage('en-GB');
     await _selectBritishMaleVoice();
-    // Slightly slower than the iOS default reads noticeably smoother.
-    await _tts.setSpeechRate(0.45);
+    await _tts.setSpeechRate(0.5); // iOS default-ish; reliable + natural
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
     // Clear the speaking indicator whenever playback ends or is cancelled.
@@ -36,9 +32,10 @@ class TtsService {
     _tts.setErrorHandler((_) => speakingKey.value = null);
   }
 
-  /// Pick a natural British male voice. On iOS the classic en-GB male voice is
-  /// "Daniel" (with "(Enhanced)"/"(Premium)" variants when downloaded). Falls
-  /// back to any en-GB voice, preferring known male names.
+  /// Pick a natural British male voice (en-GB), preferring known male names.
+  /// IMPORTANT: only select from voices actually present in the device's voice
+  /// list and do NOT force "Enhanced/Premium" variants — choosing an enhanced
+  /// voice that isn't downloaded makes iOS synthesize silence.
   Future<void> _selectBritishMaleVoice() async {
     try {
       final raw = await _tts.getVoices;
@@ -51,33 +48,23 @@ class TtsService {
       if (enGB.isEmpty) return;
 
       const malePref = ['daniel', 'arthur', 'oliver', 'george', 'james', 'malcolm'];
-      bool isMale(Map v) =>
-          malePref.any((n) => v['name'].toString().toLowerCase().contains(n));
-      // Enhanced/Premium voices sound far smoother than the compact default.
-      bool isHiFi(Map v) {
-        final s = '${v['name']} ${v['quality'] ?? ''}'.toLowerCase();
-        return s.contains('enhanced') || s.contains('premium');
-      }
-
-      Map? firstMatch(bool Function(Map) test) {
+      Map? pick;
+      for (final name in malePref) {
         for (final v in enGB) {
-          if (test(v)) return v;
+          if (v['name'].toString().toLowerCase().contains(name)) {
+            pick = v;
+            break;
+          }
         }
-        return null;
+        if (pick != null) break;
       }
-
-      // Priority: male + high-fidelity -> male -> any high-fidelity -> first.
-      Map? pick = firstMatch((v) => isMale(v) && isHiFi(v));
-      pick ??= firstMatch(isMale);
-      pick ??= firstMatch(isHiFi);
       pick ??= enGB.first;
       await _tts.setVoice({
         'name': pick['name'].toString(),
         'locale': pick['locale'].toString(),
       });
     } catch (_) {
-      // Voice list unavailable (some platforms) — en-GB language alone still
-      // gives a British accent.
+      // Voice list unavailable — en-GB language alone still gives a UK accent.
     }
   }
 
