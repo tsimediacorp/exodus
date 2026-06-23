@@ -21,9 +21,13 @@ class TtsService {
   Future<void> _init() async {
     if (_initialized) return;
     _initialized = true;
+    // Let an utterance play through fully — reduces the choppy starts/stops
+    // some iOS voices have when speak() is fired without awaiting completion.
+    await _tts.awaitSpeakCompletion(true);
     await _tts.setLanguage('en-GB');
     await _selectBritishMaleVoice();
-    await _tts.setSpeechRate(0.5); // 0.5 ≈ natural pace on iOS/web
+    // Slightly slower than the iOS default reads noticeably smoother.
+    await _tts.setSpeechRate(0.45);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
     // Clear the speaking indicator whenever playback ends or is cancelled.
@@ -47,16 +51,25 @@ class TtsService {
       if (enGB.isEmpty) return;
 
       const malePref = ['daniel', 'arthur', 'oliver', 'george', 'james', 'malcolm'];
-      Map? pick;
-      for (final name in malePref) {
-        for (final v in enGB) {
-          if (v['name'].toString().toLowerCase().contains(name)) {
-            pick = v;
-            break;
-          }
-        }
-        if (pick != null) break;
+      bool isMale(Map v) =>
+          malePref.any((n) => v['name'].toString().toLowerCase().contains(n));
+      // Enhanced/Premium voices sound far smoother than the compact default.
+      bool isHiFi(Map v) {
+        final s = '${v['name']} ${v['quality'] ?? ''}'.toLowerCase();
+        return s.contains('enhanced') || s.contains('premium');
       }
+
+      Map? firstMatch(bool Function(Map) test) {
+        for (final v in enGB) {
+          if (test(v)) return v;
+        }
+        return null;
+      }
+
+      // Priority: male + high-fidelity -> male -> any high-fidelity -> first.
+      Map? pick = firstMatch((v) => isMale(v) && isHiFi(v));
+      pick ??= firstMatch(isMale);
+      pick ??= firstMatch(isHiFi);
       pick ??= enGB.first;
       await _tts.setVoice({
         'name': pick['name'].toString(),

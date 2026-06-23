@@ -72,6 +72,31 @@ class _MessageBubbleState extends State<MessageBubble> {
     ));
   }
 
+  /// Long-press a message (user OR assistant) to delete it, with a confirm.
+  Future<void> _confirmDelete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ExodusTheme.midnight,
+        title: const Text('Delete message?',
+            style: TextStyle(color: ExodusTheme.porcelain)),
+        content: const Text('This message will be removed from the conversation.',
+            style: TextStyle(color: ExodusTheme.ironMist)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel',
+                  style: TextStyle(color: ExodusTheme.ironMist))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete',
+                  style: TextStyle(color: ExodusTheme.crimson))),
+        ],
+      ),
+    );
+    if (ok == true) widget.onDelete?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
@@ -94,6 +119,8 @@ class _MessageBubbleState extends State<MessageBubble> {
               Flexible(
                 child: GestureDetector(
                   onTap: _toggleActions,
+                  onLongPress:
+                      widget.onDelete == null ? null : _confirmDelete,
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
