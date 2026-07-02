@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/splash_screen.dart';
+import 'services/amplify_service.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
 import 'services/storage_service.dart';
@@ -50,6 +51,9 @@ Future<void> main() async {
     } catch (_) {
       // Notifications are best-effort; the app still works without them.
     }
+
+    // Couples-in-Sync backend. Best-effort: the local-first app works without it.
+    await AmplifyService.configure();
 
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,

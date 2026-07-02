@@ -33,6 +33,7 @@ class AppDrawer extends StatelessWidget {
     (icon: Icons.menu_book_outlined, active: Icons.menu_book, label: 'Counsel'),
     (icon: Icons.spatial_audio_off_outlined, active: Icons.spatial_audio_off, label: 'Coaching'),
     (icon: Icons.wb_sunny_outlined, active: Icons.wb_sunny, label: 'Devotional'),
+    (icon: Icons.favorite_outline, active: Icons.favorite, label: 'Together'),
   ];
 
   @override

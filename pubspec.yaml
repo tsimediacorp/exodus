@@ -19,6 +19,9 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
   flutter_timezone: ^1.0.8
+  amplify_flutter: ^2.6.0
+  amplify_auth_cognito: ^2.6.0
+  amplify_api: ^2.6.0
   cupertino_icons: ^1.0.6
 
 dev_dependencies:

@@ -6,6 +6,7 @@ import 'chat_screen.dart';
 import 'coaching_screen.dart';
 import 'devotional_screen.dart';
 import 'memory_screen.dart';
+import 'together_screen.dart';
 
 /// Root navigation after the splash. Modes (Counsel / Coaching / Devotional)
 /// live in the left drawer; an IndexedStack keeps each mode's state alive. The
@@ -83,6 +84,7 @@ class _HomeShellState extends State<HomeShell> {
           ChatScreen(key: _chatKey, onOpenMenu: _openMenu),
           CoachingScreen(onOpenMenu: _openMenu),
           DevotionalScreen(onOpenMenu: _openMenu),
+          TogetherScreen(onOpenMenu: _openMenu),
         ],
       ),
     );
