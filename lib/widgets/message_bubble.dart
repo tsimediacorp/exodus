@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import '../models/chat_message.dart';
+import '../screens/reader_screen.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import 'exodus_shield.dart';
@@ -197,6 +198,16 @@ class _MessageBubbleState extends State<MessageBubble> {
                 onRegenerate: widget.onRegenerate,
                 onEdit: widget.onEdit,
                 onDelete: widget.onDelete,
+                onReader: message.content.trim().isEmpty
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ReaderScreen(
+                              text: message.content,
+                              markdown: !_isUser,
+                            ),
+                          ),
+                        ),
               ),
             ),
         ],
@@ -213,6 +224,7 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback? onRegenerate;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final VoidCallback? onReader;
 
   const _ActionBar({
     required this.isAssistant,
@@ -222,11 +234,14 @@ class _ActionBar extends StatelessWidget {
     required this.onRegenerate,
     required this.onEdit,
     required this.onDelete,
+    required this.onReader,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _ActionButton(icon: Icons.copy_rounded, label: 'Copy', onTap: onCopy),
@@ -259,11 +274,17 @@ class _ActionBar extends StatelessWidget {
             ),
           ],
         ],
+        if (onReader != null) ...[
+          const SizedBox(width: 4),
+          _ActionButton(
+              icon: Icons.menu_book_rounded, label: 'Reader', onTap: onReader!),
+        ],
         if (onDelete != null) ...[
           const SizedBox(width: 4),
           _ActionButton(icon: Icons.delete_outline_rounded, label: 'Delete', onTap: onDelete!),
         ],
       ],
+      ),
     );
   }
 }
