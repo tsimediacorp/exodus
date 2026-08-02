@@ -13,6 +13,11 @@ import 'theme/exodus_theme.dart';
 /// of showing a blank white view.
 String? _startupError;
 
+/// True once runApp has been called. Distinguishes a fatal startup failure
+/// (worth showing an error screen for) from a background error in a running
+/// app (which must not blow the UI away).
+bool _appStarted = false;
+
 Future<void> main() async {
   // Replace the default grey error box with a readable, copyable error screen.
   ErrorWidget.builder = (FlutterErrorDetails details) => _ErrorView(
@@ -52,8 +57,13 @@ Future<void> main() async {
       // Notifications are best-effort; the app still works without them.
     }
 
-    // Couples-in-Sync backend. Best-effort: the local-first app works without it.
-    await AmplifyService.configure();
+    // Couples-in-Sync backend. Best-effort: the local-first app works without
+    // it, so a slow network must not hold the first frame hostage.
+    try {
+      await AmplifyService.configure().timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Together shows its own "unavailable" state with a retry.
+    }
 
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -62,9 +72,18 @@ Future<void> main() async {
       systemNavigationBarIconBrightness: Brightness.light,
     ));
 
+    _appStarted = true;
     runApp(const ExodusApp());
   }, (error, stack) {
-    // Any uncaught async error during startup lands here. Show it.
+    // Only a failure BEFORE the app is up warrants replacing the whole UI with
+    // the error screen. Once running, an uncaught async error from any
+    // background task used to tear down the live app with no way back — now it
+    // is just reported.
+    if (_appStarted) {
+      FlutterError.reportError(
+          FlutterErrorDetails(exception: error, stack: stack));
+      return;
+    }
     _startupError = '$error\n\n$stack';
     runApp(ExodusApp(forcedError: '$error\n\n$stack'));
   });

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 import '../config/devotional_prompt.dart';
 import '../models/chat_message.dart';
 import '../services/ai_service.dart';
@@ -69,31 +70,83 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
     try {
       await for (final chunk
           in _ai.askStream(userMessage: prompt, history: history)) {
+        if (!mounted) return;
         setState(() => reply.content += chunk);
         _scrollEnd();
       }
     } catch (e) {
-      setState(() => reply.content = 'Something went wrong: $e');
+      // Backing out mid-stream disposes the client and throws here, so every
+      // setState below needs the mounted guard.
+      if (mounted) {
+        setState(() => reply.content = reply.content.isEmpty
+            ? _friendlyError(e)
+            : '${reply.content}\n\n_(cut off: ${_friendlyError(e)})_');
+      }
     } finally {
-      setState(() {
-        reply.isStreaming = false;
-        _busy = false;
-      });
+      if (mounted) {
+        setState(() {
+          reply.isStreaming = false;
+          _busy = false;
+        });
+      }
     }
   }
+
+  String _friendlyError(Object e) {
+    final s = e.toString();
+    if (e is TimeoutException || s.contains('TimeoutException')) {
+      return 'EXODUS took too long to respond. Try again.';
+    }
+    if (s.contains('SocketException') || s.contains('Failed host lookup')) {
+      return 'No internet connection.';
+    }
+    if (s.contains('(401)') || s.contains('(403)')) {
+      return 'The API key was rejected. Check Settings.';
+    }
+    if (s.contains('(429)')) return 'Rate limited — try again in a moment.';
+    return 'Something went wrong. Try again.';
+  }
+
+  /// The couple's own words, as a starting point when the model can't
+  /// summarise — better than handing them an empty box.
+  String get _lastUserMessage => _messages
+      .lastWhere((m) => m.sender == Sender.user,
+          orElse: () => ChatMessage(sender: Sender.user, content: ''))
+      .content
+      .trim();
 
   Future<void> _saveGoal() async {
     if (_busy) return;
     setState(() => _busy = true);
-    String goal;
+    String goal = '';
+    var failed = false;
     try {
       goal = await _devo.summarizeGoal(_messages);
     } catch (_) {
-      goal = widget.currentGoal ?? '';
+      failed = true;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
     if (!mounted) return;
+
+    // ask() returns '' WITHOUT throwing when a reasoning model burns its whole
+    // budget on hidden reasoning, so an empty result is a failure too — it used
+    // to open an empty dialog whose Save button silently did nothing.
+    if (goal.isEmpty) {
+      failed = true;
+      goal = widget.currentGoal ?? _lastUserMessage;
+    }
+    if (failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'EXODUS couldn\'t summarise your goal — write it in your own '
+              'words below.'),
+          backgroundColor: ExodusTheme.steel,
+        ),
+      );
+    }
+
     final controller = TextEditingController(text: goal);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -104,6 +157,7 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
         content: TextField(
           controller: controller,
           maxLines: 3,
+          autofocus: goal.isEmpty,
           style: const TextStyle(color: ExodusTheme.porcelain),
           decoration: const InputDecoration(hintText: 'Our goal…'),
         ),
@@ -112,16 +166,26 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel', style: TextStyle(color: ExodusTheme.ironMist)),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: ExodusTheme.covenantBlue),
-            child: const Text('Save'),
+          // Rebuild on every keystroke so Save is genuinely disabled while
+          // empty rather than looking tappable and doing nothing.
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (_, value, __) => FilledButton(
+              onPressed: value.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: ExodusTheme.covenantBlue),
+              child: const Text('Save'),
+            ),
           ),
         ],
       ),
     );
-    if (confirmed == true && controller.text.trim().isNotEmpty && mounted) {
-      Navigator.of(context).pop(controller.text.trim());
+    final text = controller.text.trim();
+    controller.dispose();
+    if (confirmed == true && text.isNotEmpty && mounted) {
+      Navigator.of(context).pop(text);
     }
   }
 
@@ -142,8 +206,21 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
         actions: [
           TextButton(
             onPressed: _busy ? null : _saveGoal,
-            child: const Text('Save goal',
-                style: TextStyle(color: ExodusTheme.covenantGlow, fontWeight: FontWeight.w600)),
+            // foregroundColor rather than a hardcoded colour on the child, so
+            // the disabled state is actually visible.
+            style: TextButton.styleFrom(
+              foregroundColor: ExodusTheme.covenantGlow,
+              disabledForegroundColor: ExodusTheme.steel,
+              textStyle: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            child: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: ExodusTheme.steel),
+                  )
+                : const Text('Save goal'),
           ),
         ],
       ),
@@ -178,10 +255,16 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
           border: isUser ? null : Border.all(color: ExodusTheme.steel),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Text(
-          m.content.isEmpty && m.isStreaming ? '…' : m.content,
-          style: const TextStyle(color: ExodusTheme.porcelain, fontSize: 15, height: 1.45),
-        ),
+        // GptMarkdown, matching Counsel — plain Text rendered the model's
+        // **bold** and headings as literal asterisks and hashes here.
+        child: m.content.isEmpty && m.isStreaming
+            ? const Text('…',
+                style: TextStyle(color: ExodusTheme.porcelain, fontSize: 15))
+            : GptMarkdown(
+                m.content,
+                style: const TextStyle(
+                    color: ExodusTheme.porcelain, fontSize: 15, height: 1.45),
+              ),
       ),
     );
   }

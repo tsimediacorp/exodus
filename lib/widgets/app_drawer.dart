@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/conversation.dart';
+import '../screens/bible_screen.dart';
+import '../screens/journeys_screen.dart';
+import '../screens/letters_screen.dart';
+import '../screens/settings_screen.dart';
 import '../theme/exodus_theme.dart';
 import 'exodus_shield.dart';
 
@@ -66,9 +70,43 @@ class AppDrawer extends StatelessWidget {
             const Divider(color: ExodusTheme.steel, height: 1),
             _footerTile(
               context,
+              icon: Icons.menu_book_rounded,
+              label: 'Bible',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BibleScreen()),
+              ),
+            ),
+            _footerTile(
+              context,
+              icon: Icons.mail_outline_rounded,
+              label: 'Weekly letter',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LettersScreen()),
+              ),
+            ),
+            _footerTile(
+              context,
+              icon: Icons.route_rounded,
+              label: 'Journeys',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const JourneysScreen()),
+              ),
+            ),
+            _footerTile(
+              context,
               icon: Icons.psychology_outlined,
               label: 'Memory',
               onTap: onOpenMemory,
+            ),
+            // Settings used to live only in the Counsel app bar, so from
+            // Coaching/Devotional/Together you had to switch tabs to reach it.
+            _footerTile(
+              context,
+              icon: Icons.settings_outlined,
+              label: 'Settings',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              ),
             ),
           ],
         ),

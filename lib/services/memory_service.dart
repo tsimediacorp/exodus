@@ -20,6 +20,20 @@ Return ONLY a JSON array of short plain-text strings (each a single fact).
 If there is nothing new worth remembering, return [].
 ''';
 
+  /// Fire-and-forget capture that owns its own client and closes it when the
+  /// request finishes. Use this when the caller is about to be disposed (e.g.
+  /// a coaching session popping its route) — an instance owned by that caller
+  /// would have its client closed out from under the in-flight request, and
+  /// one constructed inline would leak instead.
+  static Future<void> captureCoachingDetached(List<CoachingTurn> transcript) async {
+    final service = MemoryService();
+    try {
+      await service.captureFromCoaching(transcript);
+    } finally {
+      service.dispose();
+    }
+  }
+
   Future<void> captureFromChat(List<ChatMessage> conversation) =>
       _capture(conversation, 'chat');
 

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import '../config/devotional_fallback.dart';
 import '../config/devotional_prompt.dart';
 import '../models/chat_message.dart';
@@ -10,6 +12,11 @@ import 'ai_service.dart';
 /// in the same source of truth as everything else.
 class DevotionalService {
   final AiService _ai = AiService();
+
+  /// Why the last [generate] call fell back, or null if it produced a real
+  /// devotional. [generate] never throws, so this is how callers learn that
+  /// what they got is canned content rather than a fresh word.
+  String? lastGenerateError;
 
   static const _months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -33,7 +40,9 @@ class DevotionalService {
     List<String> recentRefs = const [],
   }) async {
     final day = forDay ?? DateTime.now();
+    lastGenerateError = null;
     const maxAttempts = 2;
+    Object? lastError;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         final raw = await _ai.ask(
@@ -50,29 +59,57 @@ class DevotionalService {
             devo.scriptureText.trim().isNotEmpty) {
           return devo;
         }
-      } catch (_) {
+        lastError = 'The model returned an incomplete devotional.';
+      } catch (e) {
         // transient (timeout, network, parse) — try again, then fall back
+        lastError = e;
       }
       if (attempt < maxAttempts - 1) {
         await Future.delayed(const Duration(milliseconds: 600));
       }
     }
+    lastGenerateError = _friendlyError(lastError);
     return fallbackFor(day, goal);
+  }
+
+  /// Turn a raw exception into something worth showing a user.
+  static String _friendlyError(Object? e) {
+    if (e == null) return 'Could not reach EXODUS.';
+    final s = e.toString();
+    if (e is TimeoutException || s.contains('TimeoutException')) {
+      return 'The connection timed out.';
+    }
+    if (e is SocketException || s.contains('SocketException')) {
+      return 'No internet connection.';
+    }
+    if (s.contains('(401)') || s.contains('(403)')) {
+      return 'The API key was rejected. Check Settings.';
+    }
+    if (s.contains('(429)')) return 'Rate limited — try again in a moment.';
+    return s.replaceFirst('Exception: ', '');
   }
 
   /// A complete, on-theme devotional that always works — used when the model
   /// can't produce one, and to show instantly while the AI one generates.
+  /// Flagged [isFallback] so callers can retry for a real one later.
   Devotional fallbackFor(DateTime day, String goal) {
     final f = DevotionalFallback.forDay(day);
-    return Devotional.fromGenerated(day: day, json: f, goal: goal);
+    return Devotional.fromGenerated(
+        day: day, json: f, goal: goal, isFallback: true);
   }
 
   /// Distill a free-form goal-setting conversation into one clear goal line.
+  ///
+  /// Returns an empty string when the model gives us nothing usable — note
+  /// [AiService.ask] returns `''` *without throwing* when a reasoning model
+  /// spends its whole budget on hidden reasoning, so callers must treat an
+  /// empty result as a failure rather than assuming success.
   Future<String> summarizeGoal(List<ChatMessage> conversation) async {
     final line = await _ai.ask(
       userMessage: DevotionalPrompt.goalSummaryTask(),
       history: conversation,
       maxTokens: 1500,
+      timeout: const Duration(seconds: 30),
     );
     return line.trim().replaceAll(RegExp(r'^["“]|["”]$'), '').trim();
   }

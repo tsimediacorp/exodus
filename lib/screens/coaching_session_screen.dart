@@ -63,10 +63,38 @@ class _CoachingSessionScreenState extends State<CoachingSessionScreen> {
     _session.endedAt = DateTime.now();
     await StorageService.instance.addCoachingSession(_session);
     // Distill durable memory from the session (fire-and-forget, best-effort).
+    // Detached: it outlives this screen, and closes its own http client when
+    // done — an inline MemoryService() leaked one client per session.
     if (_session.transcript.isNotEmpty) {
-      MemoryService().captureFromCoaching(_session.transcript);
+      unawaited(MemoryService.captureCoachingDetached(_session.transcript));
     }
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Confirm before killing a live session — it's a single tap next to the
+  /// clock, and there's no way to resume once it ends.
+  Future<void> _confirmEnd() async {
+    if (_ended) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ExodusTheme.midnight,
+        title: const Text('End this session?'),
+        content: const Text(
+            'The session will finish and be saved to your history. You can\'t '
+            'resume it afterwards.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep going')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('End session',
+                  style: TextStyle(color: ExodusTheme.crimson))),
+        ],
+      ),
+    );
+    if (confirmed == true) await _end();
   }
 
   @override
@@ -114,45 +142,54 @@ class _CoachingSessionScreenState extends State<CoachingSessionScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: _end,
+                  onPressed: _confirmEnd,
                   icon: const Icon(Icons.close, color: ExodusTheme.ironMist, size: 18),
                   label: const Text('End', style: TextStyle(color: ExodusTheme.ironMist)),
                 ),
               ),
               const Spacer(),
-              SizedBox(
-                width: 220,
-                height: 220,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 220,
-                      height: 220,
-                      child: CircularProgressIndicator(
-                        value: progress,
-                        strokeWidth: 6,
-                        backgroundColor: ExodusTheme.steel,
-                        valueColor: AlwaysStoppedAnimation(_status.color),
-                      ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _clock,
-                          style: const TextStyle(
-                            color: ExodusTheme.porcelain,
-                            fontSize: 44,
-                            fontWeight: FontWeight.w700,
-                          ),
+              // The ring grows with the text scale so the clock inside it
+              // doesn't clip when the user has large type turned on.
+              Builder(builder: (context) {
+                final scale =
+                    MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6);
+                final ring = 220.0 * scale;
+                return SizedBox(
+                  width: ring,
+                  height: ring,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: ring,
+                        height: ring,
+                        child: CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 6,
+                          backgroundColor: ExodusTheme.steel,
+                          valueColor: AlwaysStoppedAnimation(_status.color),
                         ),
-                        Text(_status.label, style: TextStyle(color: _status.color, fontSize: 14)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _clock,
+                            style: const TextStyle(
+                              color: ExodusTheme.porcelain,
+                              fontSize: 44,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(_status.label,
+                              style: TextStyle(
+                                  color: _status.color, fontSize: 14)),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }),
               const SizedBox(height: 36),
               if (isError)
                 Text(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
 
 /// A distraction-free, large-text reader for a single message — for reading
@@ -19,7 +20,18 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen> {
   static const double _min = 18;
   static const double _max = 48;
-  double _size = 28;
+  static const double _default = 28;
+
+  /// Restored from prefs — the size used to reset on every open, so reading
+  /// together meant re-adjusting it every single time.
+  late double _size =
+      (StorageService.instance.loadReaderFontSize() ?? _default)
+          .clamp(_min, _max);
+
+  void _setSize(double next) {
+    setState(() => _size = next.clamp(_min, _max));
+    StorageService.instance.saveReaderFontSize(_size);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,16 +49,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
           IconButton(
             tooltip: 'Smaller',
             icon: const Icon(Icons.text_decrease_rounded, color: ExodusTheme.ironMist),
-            onPressed: _size <= _min
-                ? null
-                : () => setState(() => _size = (_size - 3).clamp(_min, _max)),
+            onPressed: _size <= _min ? null : () => _setSize(_size - 3),
           ),
           IconButton(
             tooltip: 'Larger',
             icon: const Icon(Icons.text_increase_rounded, color: ExodusTheme.ironMist),
-            onPressed: _size >= _max
-                ? null
-                : () => setState(() => _size = (_size + 3).clamp(_min, _max)),
+            onPressed: _size >= _max ? null : () => _setSize(_size + 3),
           ),
         ],
       ),

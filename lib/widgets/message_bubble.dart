@@ -4,9 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import '../models/chat_message.dart';
 import '../screens/reader_screen.dart';
+import '../services/bible_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import 'exodus_shield.dart';
+import 'scripture_link.dart';
 
 Uint8List? _decodeDataUrl(String dataUrl) {
   final comma = dataUrl.indexOf(',');
@@ -65,6 +67,52 @@ class _MessageBubbleState extends State<MessageBubble> {
     setState(() => _showActions = !_showActions);
   }
 
+  /// Tappable chips for every passage cited in this reply.
+  Widget _scriptureChips() {
+    final refs = BibleService.instance.findAll(widget.message.content);
+    if (refs.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: EdgeInsets.only(top: 8, left: _isUser ? 0 : 38),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final ref in refs.take(6))
+            Semantics(
+              button: true,
+              label: 'Open ${BibleService.instance.label(ref)} in the Bible',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => openScripture(context, ref),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: ExodusTheme.brass.withValues(alpha: 0.5)),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.menu_book_rounded,
+                          size: 13, color: ExodusTheme.brass),
+                      const SizedBox(width: 6),
+                      Text(BibleService.instance.label(ref),
+                          style: const TextStyle(
+                              color: ExodusTheme.brass,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   void _copy() {
     Clipboard.setData(ClipboardData(text: widget.message.content));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -93,96 +141,107 @@ class _MessageBubbleState extends State<MessageBubble> {
                 const SizedBox(width: 10),
               ],
               Flexible(
-                child: GestureDetector(
-                  onTap: _toggleActions,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      gradient: _isUser
-                          ? const LinearGradient(
-                              colors: [
-                                ExodusTheme.covenantBlue,
-                                Color(0xFF2D5BC8)
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
-                          : null,
-                      color: _isUser ? null : ExodusTheme.midnight,
-                      border: _isUser
-                          ? null
-                          : Border.all(color: ExodusTheme.steel, width: 1),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: Radius.circular(_isUser ? 16 : 4),
-                        bottomRight: Radius.circular(_isUser ? 4 : 16),
+                child: Semantics(
+                  button: true,
+                  label: _isUser
+                      ? 'Your message. Tap for options.'
+                      : 'EXODUS reply. Tap for options.',
+                  child: GestureDetector(
+                    onTap: _toggleActions,
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: _isUser
+                            ? const LinearGradient(
+                                colors: [
+                                  ExodusTheme.covenantBlue,
+                                  Color(0xFF2D5BC8)
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : null,
+                        color: _isUser ? null : ExodusTheme.midnight,
+                        border: _isUser
+                            ? null
+                            : Border.all(color: ExodusTheme.steel, width: 1),
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(_isUser ? 16 : 4),
+                          bottomRight: Radius.circular(_isUser ? 4 : 16),
+                        ),
                       ),
-                    ),
-                    // Show the typing dots until real text actually arrives —
-                    // not just until isLoading flips — so we never render an
-                    // empty bubble with a lonely streaming cursor.
-                    child: (message.content.trim().isEmpty &&
-                            (message.isLoading || message.isStreaming))
-                        ? _TypingIndicator(startTime: message.timestamp)
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (message.images.isNotEmpty)
-                                _AttachedImages(
-                                  images: message.images,
-                                  hasText: message.content.trim().isNotEmpty,
-                                ),
-                              if (_isUser && message.content.trim().isNotEmpty)
-                                SelectableText(
-                                  message.content,
-                                  style: const TextStyle(
-                                    color: ExodusTheme.porcelain,
-                                    fontSize: 15,
-                                    height: 1.55,
-                                    fontWeight: FontWeight.w500,
+                      // Show the typing dots until real text actually arrives —
+                      // not just until isLoading flips — so we never render an
+                      // empty bubble with a lonely streaming cursor.
+                      child: (message.content.trim().isEmpty &&
+                              (message.isLoading || message.isStreaming))
+                          ? _TypingIndicator(startTime: message.timestamp)
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (message.images.isNotEmpty)
+                                  _AttachedImages(
+                                    images: message.images,
+                                    hasText: message.content.trim().isNotEmpty,
                                   ),
-                                )
-                              else if (!_isUser)
-                                GptMarkdown(
-                                  message.content,
-                                  style: const TextStyle(
-                                    color: ExodusTheme.porcelain,
-                                    fontSize: 15,
-                                    height: 1.55,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                ),
-                              if (message.isStreaming)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 6),
-                                  child: _StreamingCursor(),
-                                ),
-                              if (!_isUser &&
-                                  !message.isStreaming &&
-                                  message.responseTimeMs != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    _formatElapsed(message.responseTimeMs!),
+                                if (_isUser && message.content.trim().isNotEmpty)
+                                  SelectableText(
+                                    message.content,
                                     style: const TextStyle(
-                                      color: ExodusTheme.ironMist,
-                                      fontSize: 11,
-                                      fontFeatures: [
-                                        FontFeature.tabularFigures()
-                                      ],
+                                      color: ExodusTheme.porcelain,
+                                      fontSize: 15,
+                                      height: 1.55,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  )
+                                else if (!_isUser)
+                                  GptMarkdown(
+                                    message.content,
+                                    style: const TextStyle(
+                                      color: ExodusTheme.porcelain,
+                                      fontSize: 15,
+                                      height: 1.55,
+                                      fontWeight: FontWeight.w400,
                                     ),
                                   ),
-                                ),
-                            ],
-                          ),
+                                if (message.isStreaming)
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 6),
+                                    child: _StreamingCursor(),
+                                  ),
+                                if (!_isUser &&
+                                    !message.isStreaming &&
+                                    message.responseTimeMs != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(
+                                      _formatElapsed(message.responseTimeMs!),
+                                      style: const TextStyle(
+                                        color: ExodusTheme.ironMist,
+                                        fontSize: 11,
+                                        fontFeatures: [
+                                          FontFeature.tabularFigures()
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                    ),
                   ),
                 ),
               ),
             ],
           ),
+          // Scripture EXODUS cited, as chips that open the in-app Bible at the
+          // passage. Chips rather than inline links because the reply is
+          // rendered as markdown, and rewriting its spans would fight the
+          // renderer.
+          if (!_isUser && !message.isStreaming) _scriptureChips(),
           if (_showActions && _canShowActions)
             Padding(
               padding: EdgeInsets.only(
@@ -305,25 +364,38 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = highlight ? ExodusTheme.brass : ExodusTheme.ironMist;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 15, color: color),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(8),
+        // 44pt minimum. These were ~27pt tall and sat 4pt apart, so Delete
+        // was one mis-tap away from Copy.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 15, color: color),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

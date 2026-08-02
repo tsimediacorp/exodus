@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
@@ -37,6 +37,17 @@ class ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   StreamSubscription<String>? _activeStream;
 
+  /// Completed when the active stream ends. Held here (not just as a local in
+  /// _send) so "Stop" can release the awaiting send — cancelling a
+  /// subscription does NOT fire onDone, so without this the send would hang.
+  Completer<void>? _activeCompleter;
+
+  /// Set when the user hits Stop, so the finished reply is labelled as stopped
+  /// rather than as an empty/failed response.
+  bool _stopRequested = false;
+
+  Timer? _draftDebounce;
+
   /// Whether to show the "jump to latest" arrow (user has scrolled up).
   bool _showScrollDown = false;
 
@@ -59,6 +70,9 @@ class ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // Restore anything typed but never sent before the app was killed.
+    _input.text = _storage.loadComposerDraft();
+    _input.addListener(_saveDraft);
     _conversations = _storage.loadConversations();
     final id = _storage.getCurrentConversationId();
     if (id != null) {
@@ -81,12 +95,62 @@ class ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _activeStream?.cancel();
+    _draftDebounce?.cancel();
     TtsService.instance.stop();
+    _input.removeListener(_saveDraft);
     _input.dispose();
     _scroll.dispose();
     _ai.dispose();
     _memory.dispose();
     super.dispose();
+  }
+
+  /// Debounced so we're not hitting prefs on every keystroke.
+  void _saveDraft() {
+    _draftDebounce?.cancel();
+    _draftDebounce = Timer(const Duration(milliseconds: 400),
+        () => _storage.saveComposerDraft(_input.text));
+  }
+
+  void _sendWithHaptic() {
+    HapticFeedback.lightImpact();
+    _send();
+  }
+
+  /// Stop the in-flight reply, keeping whatever text already arrived.
+  /// Cancelling the subscription doesn't fire onDone, so the completer has to
+  /// be released by hand or _send would wait forever.
+  void _stopGenerating() {
+    if (!_sending) return;
+    HapticFeedback.lightImpact();
+    _stopRequested = true;
+    _activeStream?.cancel();
+    _activeStream = null;
+    if (_activeCompleter?.isCompleted == false) _activeCompleter!.complete();
+  }
+
+  /// Plain-language message for a failed request. The raw provider text is
+  /// kept underneath in a details block rather than dumped as the whole reply.
+  String _errorMessage(Object err) {
+    final s = err.toString();
+    String headline;
+    if (err is TimeoutException || s.contains('TimeoutException')) {
+      headline = 'EXODUS took too long to respond.';
+    } else if (s.contains('SocketException') ||
+        s.contains('Failed host lookup') ||
+        s.contains('Connection refused')) {
+      headline = 'No internet connection.';
+    } else if (s.contains('(401)') || s.contains('(403)')) {
+      headline = 'The API key was rejected. Check it in Settings.';
+    } else if (s.contains('(429)')) {
+      headline = 'Rate limited — wait a moment and try again.';
+    } else if (s.contains('No API key configured')) {
+      headline = 'No API key is set up. Add one in Settings.';
+    } else {
+      headline = 'The request failed.';
+    }
+    return '**$headline**\n\nTap Regenerate to try again.\n\n'
+        '<details><summary>Details</summary>\n\n```\n$s\n```\n\n</details>';
   }
 
   /// Fire-and-forget: distill durable memory from a conversation we're leaving.
@@ -215,6 +279,9 @@ class ChatScreenState extends State<ChatScreen> {
     setState(() {
       conv.messages.add(userMsg);
       _input.clear();
+      // The message is now in the conversation — drop the saved draft.
+      _draftDebounce?.cancel();
+      _storage.saveComposerDraft('');
       _pendingImages.clear();
     });
 
@@ -263,6 +330,7 @@ class ChatScreenState extends State<ChatScreen> {
     // prompt turn itself (the prompt is passed separately to askStream).
     final history = conv.messages.sublist(0, conv.messages.length - 2);
     final completer = Completer<void>();
+    _activeCompleter = completer;
     final stopwatch = Stopwatch()..start();
 
     try {
@@ -274,15 +342,15 @@ class ChatScreenState extends State<ChatScreen> {
             if (replyMsg.isLoading) replyMsg.isLoading = false;
             replyMsg.content += chunk;
           });
-          _scrollToEnd();
+          // Only follow along if the user is already at the bottom. Scrolling
+          // unconditionally yanked them back down mid-read on every token.
+          if (!_showScrollDown) _scrollToEnd();
         },
         onError: (err) {
           setState(() {
             replyMsg.isLoading = false;
             replyMsg.isStreaming = false;
-            // Surface the actual API error verbatim so the user sees moderation
-            // / restricted-key / rate-limit messages instead of a generic wrap.
-            replyMsg.content = '**Request failed.**\n\n```\n$err\n```';
+            replyMsg.content = _errorMessage(err);
           });
           if (!completer.isCompleted) completer.complete();
         },
@@ -300,7 +368,7 @@ class ChatScreenState extends State<ChatScreen> {
       setState(() {
         replyMsg.isLoading = false;
         replyMsg.isStreaming = false;
-        replyMsg.content = '**Request failed.**\n\n```\n$e\n```';
+        replyMsg.content = _errorMessage(e);
       });
     } finally {
       stopwatch.stop();
@@ -312,21 +380,30 @@ class ChatScreenState extends State<ChatScreen> {
       }
       // Stream finished but nothing came back — don't leave an empty bubble.
       if (replyMsg.content.trim().isEmpty) {
-        replyMsg.content =
-            '_(No response came back. Tap Regenerate to try again.)_';
+        replyMsg.content = _stopRequested
+            ? '_(Stopped.)_'
+            : '_(No response came back. Tap Regenerate to try again.)_';
+      } else if (_stopRequested) {
+        replyMsg.content += '\n\n_(Stopped.)_';
       }
+      _stopRequested = false;
       setState(() {
         _sending = false;
         replyMsg.isStreaming = false;
+        // Stopping cancels the subscription, so onDone never fires and this
+        // would stay true — which would drop the message from the history
+        // sent on the next turn (_buildBody filters out isLoading messages).
+        replyMsg.isLoading = false;
         replyMsg.responseTimeMs = stopwatch.elapsedMilliseconds;
       });
       _activeStream = null;
+      _activeCompleter = null;
       conv.updatedAt = DateTime.now();
       if (conv.title == 'New conversation') {
         conv.deriveTitleFromFirstUserMessage();
       }
       await _persist();
-      _scrollToEnd();
+      if (!_showScrollDown) _scrollToEnd();
     }
   }
 
@@ -571,12 +648,32 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   /// Delete a single message (user or assistant) from the conversation.
-  void _deleteMessage(ChatMessage msg) {
+  /// Confirmed first — the action row sits at thumb height and Delete is one
+  /// mis-tap away from Copy. Matches the conversation-delete flow in the drawer.
+  Future<void> _deleteMessage(ChatMessage msg) async {
     final conv = _current;
     if (conv == null || _sending) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ExodusTheme.midnight,
+        title: const Text('Delete message?'),
+        content: const Text('This message will be removed from the conversation.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete',
+                  style: TextStyle(color: ExodusTheme.crimson))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     setState(() => conv.messages.remove(msg));
     conv.updatedAt = DateTime.now();
-    _persist();
+    await _persist();
   }
 
   Widget _buildInputBar() {
@@ -605,41 +702,48 @@ class ChatScreenState extends State<ChatScreen> {
               controller: _input,
               maxLines: 5,
               minLines: 1,
+              // Multi-line composing: Return inserts a newline, so there's no
+              // onSubmitted callback to hang a send off (it never fires).
               textInputAction: TextInputAction.newline,
               style: const TextStyle(color: ExodusTheme.porcelain),
               decoration: const InputDecoration(
                 hintText: 'Ask EXODUS...',
               ),
-              onSubmitted: (_) => _send(),
             ),
           ),
           const SizedBox(width: 10),
-          GestureDetector(
-            onTap: _sending ? null : _send,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: _sending
-                      ? const [ExodusTheme.steel, ExodusTheme.slate]
-                      : const [ExodusTheme.covenantBlue, ExodusTheme.covenantGlow],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+          // While streaming this becomes a Stop button — the subscription was
+          // already cancellable, it just had no way to reach it.
+          Semantics(
+            button: true,
+            label: _sending ? 'Stop generating' : 'Send message',
+            child: GestureDetector(
+              onTap: _sending ? _stopGenerating : _sendWithHaptic,
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: _sending
+                        ? const [ExodusTheme.steel, ExodusTheme.slate]
+                        : const [ExodusTheme.covenantBlue, ExodusTheme.covenantGlow],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: _sending
+                      ? null
+                      : [
+                          BoxShadow(
+                            color: ExodusTheme.covenantBlue.withValues(alpha: 0.4),
+                            blurRadius: 12,
+                            spreadRadius: 1,
+                          ),
+                        ],
                 ),
-                shape: BoxShape.circle,
-                boxShadow: _sending
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: ExodusTheme.covenantBlue.withValues(alpha: 0.4),
-                          blurRadius: 12,
-                          spreadRadius: 1,
-                        ),
-                      ],
+                child: Icon(_sending ? Icons.stop_rounded : Icons.arrow_upward,
+                    color: ExodusTheme.porcelain, size: 22),
               ),
-              child: const Icon(Icons.arrow_upward,
-                  color: ExodusTheme.porcelain, size: 22),
             ),
           ),
         ],
@@ -652,8 +756,12 @@ class ChatScreenState extends State<ChatScreen> {
   /// Horizontal strip of staged-image thumbnails shown above the input row,
   /// each with a remove button.
   Widget _buildPendingImages() {
+    // Sized from the text scale so the thumbnails don't clip when the user
+    // has large type turned on.
+    final scale = MediaQuery.textScalerOf(context).scale(1);
+    final thumb = 68.0 * (scale > 1 ? scale.clamp(1.0, 1.4) : 1.0);
     return Container(
-      height: 76,
+      height: thumb + 8,
       margin: const EdgeInsets.only(bottom: 10),
       alignment: Alignment.centerLeft,
       child: ListView.separated(
@@ -662,33 +770,48 @@ class ChatScreenState extends State<ChatScreen> {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
           final bytes = _decodeDataUrl(_pendingImages[i]);
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: bytes == null
-                    ? const SizedBox(width: 68, height: 68)
-                    : Image.memory(bytes,
-                        width: 68, height: 68, fit: BoxFit.cover),
-              ),
-              Positioned(
-                top: -6,
-                right: -6,
-                child: GestureDetector(
-                  onTap: () => _removePendingImage(i),
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: ExodusTheme.obsidian,
-                      shape: BoxShape.circle,
+          // The remove button lives INSIDE the Stack's bounds — it used to be
+          // Positioned at -6,-6, and Flutter doesn't hit-test children outside
+          // their parent, so the outer edge of the button was dead.
+          return SizedBox(
+            width: thumb,
+            height: thumb,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: bytes == null
+                      ? SizedBox(width: thumb, height: thumb)
+                      : Image.memory(bytes,
+                          width: thumb, height: thumb, fit: BoxFit.cover),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Semantics(
+                    button: true,
+                    label: 'Remove attachment',
+                    child: GestureDetector(
+                      onTap: () => _removePendingImage(i),
+                      // Transparent padding widens the tap target without
+                      // making the visible chip any bigger.
+                      behavior: HitTestBehavior.opaque,
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: ExodusTheme.obsidian,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.cancel,
+                              size: 22, color: ExodusTheme.ironMist),
+                        ),
+                      ),
                     ),
-                    padding: const EdgeInsets.all(2),
-                    child: const Icon(Icons.cancel,
-                        size: 20, color: ExodusTheme.ironMist),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),

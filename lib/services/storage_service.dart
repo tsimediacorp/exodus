@@ -5,7 +5,10 @@ import '../models/chat_message.dart';
 import '../models/coaching_session.dart';
 import '../models/conversation.dart';
 import '../models/devotional.dart';
+import '../models/journey.dart';
+import '../models/marriage_letter.dart';
 import '../models/memory_item.dart';
+import '../models/saved_verse.dart';
 
 /// Persists conversations and MasterPrompt runtime overrides to
 /// shared_preferences (which on iOS is NSUserDefaults — local to the app,
@@ -34,6 +37,12 @@ class StorageService {
   static const _kDevotionalGoal    = 'exodus.devotional.goal';
   static const _kDevotionals       = 'exodus.devotional.entries';
   static const _kMemory            = 'exodus.memory.items';
+  static const _kComposerDraft     = 'exodus.composer.draft';
+  static const _kReaderFontSize    = 'exodus.reader.fontSize';
+  static const _kJourneys          = 'exodus.journeys.progress';
+  static const _kActionDays        = 'exodus.devotional.actionDays';
+  static const _kSavedVerses       = 'exodus.verses.saved';
+  static const _kLetters           = 'exodus.letters';
 
   Future<void> init() async {
     try {
@@ -152,6 +161,139 @@ class StorageService {
     final all = loadCoachingSessions()..insert(0, session);
     await saveCoachingSessions(all);
   }
+
+  // ---------------- Journeys ----------------
+
+  /// Progress for every journey the couple has started, keyed by journey id.
+  Map<String, JourneyProgress> loadJourneys() {
+    final raw = _prefs?.getString(_kJourneys);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      return (jsonDecode(raw) as Map<String, dynamic>).map((k, v) => MapEntry(
+          k, JourneyProgress.fromJson(v as Map<String, dynamic>)));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  JourneyProgress? journeyProgress(String journeyId) =>
+      loadJourneys()[journeyId];
+
+  Future<void> saveJourneyProgress(JourneyProgress progress) async {
+    final all = loadJourneys()..[progress.journeyId] = progress;
+    await _prefs?.setString(
+        _kJourneys, jsonEncode(all.map((k, v) => MapEntry(k, v.toJson()))));
+  }
+
+  Future<void> deleteJourneyProgress(String journeyId) async {
+    final all = loadJourneys()..remove(journeyId);
+    await _prefs?.setString(
+        _kJourneys, jsonEncode(all.map((k, v) => MapEntry(k, v.toJson()))));
+  }
+
+  // ---------------- "Together today" streak ----------------
+
+  /// Day keys (yyyy-mm-dd) on which the couple marked the devotional's
+  /// together-action done.
+  Set<String> loadActionDays() =>
+      (_prefs?.getStringList(_kActionDays) ?? const []).toSet();
+
+  Future<void> setActionDone(String dayKey, bool done) async {
+    final all = loadActionDays();
+    if (done) {
+      all.add(dayKey);
+    } else {
+      all.remove(dayKey);
+    }
+    await _prefs?.setStringList(_kActionDays, all.toList()..sort());
+  }
+
+  // ---------------- Saved verses ----------------
+
+  List<SavedVerse> loadSavedVerses() {
+    final raw = _prefs?.getString(_kSavedVerses);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => SavedVerse.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.savedAt.compareTo(a.savedAt));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  bool isVerseSaved(String ref) =>
+      loadSavedVerses().any((v) => v.reference == ref);
+
+  Future<void> saveVerse(SavedVerse verse) async {
+    final all = loadSavedVerses()
+      ..removeWhere((v) => v.reference == verse.reference)
+      ..insert(0, verse);
+    await _prefs?.setString(
+        _kSavedVerses, jsonEncode(all.map((v) => v.toJson()).toList()));
+  }
+
+  Future<void> removeVerse(String reference) async {
+    final all = loadSavedVerses()..removeWhere((v) => v.reference == reference);
+    await _prefs?.setString(
+        _kSavedVerses, jsonEncode(all.map((v) => v.toJson()).toList()));
+  }
+
+  // ---------------- Weekly letters ----------------
+
+  List<MarriageLetter> loadLetters() {
+    final raw = _prefs?.getString(_kLetters);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => MarriageLetter.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.weekStart.compareTo(a.weekStart));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  MarriageLetter? letterForWeek(DateTime weekStart) {
+    final key = MarriageLetter.keyFor(weekStart);
+    for (final l in loadLetters()) {
+      if (l.weekKey == key) return l;
+    }
+    return null;
+  }
+
+  Future<void> saveLetter(MarriageLetter letter) async {
+    final all = loadLetters()
+      ..removeWhere((l) => l.weekKey == letter.weekKey)
+      ..add(letter);
+    all.sort((a, b) => b.weekStart.compareTo(a.weekStart));
+    await _prefs?.setString(
+        _kLetters, jsonEncode(all.map((l) => l.toJson()).toList()));
+  }
+
+  // ---------------- Composer draft ----------------
+
+  /// Unsent composer text, so a force-quit mid-compose doesn't lose it.
+  String loadComposerDraft() => _prefs?.getString(_kComposerDraft) ?? '';
+
+  Future<void> saveComposerDraft(String text) async {
+    if (text.isEmpty) {
+      await _prefs?.remove(_kComposerDraft);
+    } else {
+      await _prefs?.setString(_kComposerDraft, text);
+    }
+  }
+
+  // ---------------- Reader ----------------
+
+  /// Reader font size, so it survives closing the reader.
+  double? loadReaderFontSize() => _prefs?.getDouble(_kReaderFontSize);
+
+  Future<void> saveReaderFontSize(double size) async =>
+      _prefs?.setDouble(_kReaderFontSize, size);
 
   // ---------------- Devotionals ----------------
 

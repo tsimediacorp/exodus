@@ -16,6 +16,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _maxTokensCtrl;
   late double _temperature;
   late int _maxTokens;
+  String? _maxTokensError;
   late String _provider;
 
   @override
@@ -201,13 +202,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       controller: _maxTokensCtrl,
       keyboardType: TextInputType.number,
       style: const TextStyle(color: ExodusTheme.porcelain),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         labelText: 'Max tokens',
-        labelStyle: TextStyle(color: ExodusTheme.ironMist),
+        labelStyle: const TextStyle(color: ExodusTheme.ironMist),
+        // Invalid input used to be silently ignored — the field kept whatever
+        // it showed and quietly saved the old value.
+        errorText: _maxTokensError,
       ),
       onChanged: (v) {
-        final parsed = int.tryParse(v);
-        if (parsed != null && parsed > 0) _maxTokens = parsed;
+        final parsed = int.tryParse(v.trim());
+        setState(() {
+          if (v.trim().isEmpty) {
+            _maxTokensError = 'Enter a number';
+          } else if (parsed == null || parsed <= 0) {
+            _maxTokensError = 'Must be a positive whole number';
+          } else {
+            _maxTokensError = null;
+            _maxTokens = parsed;
+          }
+        });
       },
     );
   }

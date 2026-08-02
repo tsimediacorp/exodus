@@ -23,10 +23,16 @@ class AiService {
 
   /// Streamed completion via SSE. Yields content deltas as the model
   /// generates them. Throws on non-200 responses.
+  ///
+  /// [idleTimeout] bounds the GAP between chunks, not the total duration — it
+  /// resets on every event, so long replies stream fine but a provider that
+  /// accepts the connection and then stalls (never sending `[DONE]`, never
+  /// closing) fails fast instead of hanging the caller forever.
   Stream<String> askStream({
     required String userMessage,
     required List<ChatMessage> history,
     List<String> images = const [],
+    Duration idleTimeout = const Duration(seconds: 30),
   }) async* {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -69,7 +75,8 @@ class AiService {
 
         final lines = response.stream
             .transform(utf8.decoder)
-            .transform(const LineSplitter());
+            .transform(const LineSplitter())
+            .timeout(idleTimeout);
 
         await for (final line in lines) {
           if (!line.startsWith('data:')) continue;
@@ -108,11 +115,29 @@ class AiService {
 
   /// Transient errors worth retrying: dropped TLS handshakes, socket drops,
   /// timeouts, and the http client's generic connection failures.
-  static bool _isTransient(Object e) =>
-      e is SocketException ||
-      e is HandshakeException ||
-      e is TimeoutException ||
-      e is http.ClientException;
+  ///
+  /// Being offline is NOT transient — a failed DNS lookup means there's no
+  /// network at all, and retrying it three times with backoff just made the
+  /// user wait ~137s to be told something we knew on the first attempt.
+  static bool _isTransient(Object e) {
+    if (_isOffline(e)) return false;
+    return e is SocketException ||
+        e is HandshakeException ||
+        e is TimeoutException ||
+        e is http.ClientException;
+  }
+
+  /// A DNS failure — no route to the internet at all.
+  static bool _isOffline(Object e) {
+    if (e is SocketException) {
+      final msg = e.osError?.message ?? e.message;
+      return e.message.contains('Failed host lookup') ||
+          msg.contains('nodename nor servname') ||
+          msg.contains('Name or service not known') ||
+          msg.contains('No address associated with hostname');
+    }
+    return e.toString().contains('Failed host lookup');
+  }
 
   /// Non-streaming fallback. Kept for cases where the caller wants the
   /// finished string in one await.
