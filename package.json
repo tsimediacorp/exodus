@@ -5,6 +5,9 @@
   "description": "Amplify Gen 2 backend for EXODUS Couples-in-Sync (auth, data, server-side counseling).",
   "scripts": {
     "deploy:sandbox": "ampx sandbox",
+    "sandbox:once": "ampx sandbox --once && npm run sync:outputs",
+    "sync:outputs": "node scripts/sync-amplify-outputs.mjs",
+    "check:outputs": "node scripts/sync-amplify-outputs.mjs --check",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

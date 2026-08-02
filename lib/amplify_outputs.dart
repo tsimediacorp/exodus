@@ -1,3 +1,8 @@
+// GENERATED — do not edit by hand.
+//
+// Mirrors amplify_outputs.json (which is gitignored) so the app has its
+// backend config in a fresh clone and in CI. Regenerate after any deploy:
+//   npm run sync:outputs
 const amplifyConfig = r'''{
   "auth": {
     "user_pool_id": "us-east-1_4n7wR1LTu",
@@ -659,6 +664,125 @@ const amplifyConfig = r'''{
             "primaryKeyFieldName": "id",
             "sortKeyFieldNames": []
           }
+        },
+        "Prayer": {
+          "name": "Prayer",
+          "fields": {
+            "id": {
+              "name": "id",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true,
+              "attributes": []
+            },
+            "coupleId": {
+              "name": "coupleId",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true,
+              "attributes": []
+            },
+            "authorId": {
+              "name": "authorId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "text": {
+              "name": "text",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "visibility": {
+              "name": "visibility",
+              "isArray": false,
+              "type": {
+                "enum": "PrayerVisibility"
+              },
+              "isRequired": false,
+              "attributes": []
+            },
+            "answered": {
+              "name": "answered",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "answeredAt": {
+              "name": "answeredAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "answeredNote": {
+              "name": "answeredNote",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "members": {
+              "name": "members",
+              "isArray": true,
+              "type": "String",
+              "isRequired": false,
+              "attributes": [],
+              "isArrayNullable": true
+            },
+            "createdAt": {
+              "name": "createdAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            },
+            "updatedAt": {
+              "name": "updatedAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            }
+          },
+          "syncable": true,
+          "pluralName": "Prayers",
+          "attributes": [
+            {
+              "type": "model",
+              "properties": {}
+            },
+            {
+              "type": "auth",
+              "properties": {
+                "rules": [
+                  {
+                    "provider": "userPools",
+                    "ownerField": "members",
+                    "allow": "owner",
+                    "identityClaim": "cognito:username",
+                    "operations": [
+                      "create",
+                      "update",
+                      "delete",
+                      "read"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "primaryKeyInfo": {
+            "isCustomPrimaryKey": false,
+            "primaryKeyFieldName": "id",
+            "sortKeyFieldNames": []
+          }
         }
       },
       "enums": {
@@ -671,6 +795,13 @@ const amplifyConfig = r'''{
         },
         "MessageVisibility": {
           "name": "MessageVisibility",
+          "values": [
+            "private",
+            "shared"
+          ]
+        },
+        "PrayerVisibility": {
+          "name": "PrayerVisibility",
           "values": [
             "private",
             "shared"
@@ -699,6 +830,52 @@ const amplifyConfig = r'''{
             },
             "visibility": {
               "name": "visibility",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
+        "redeemInvite": {
+          "name": "redeemInvite",
+          "isArray": false,
+          "type": "String",
+          "isRequired": false,
+          "arguments": {
+            "inviteCode": {
+              "name": "inviteCode",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
+        "scoreDay": {
+          "name": "scoreDay",
+          "isArray": false,
+          "type": "String",
+          "isRequired": false,
+          "arguments": {
+            "coupleId": {
+              "name": "coupleId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "roundId": {
+              "name": "roundId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "day": {
+              "name": "day",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "prompt": {
+              "name": "prompt",
               "isArray": false,
               "type": "String",
               "isRequired": true

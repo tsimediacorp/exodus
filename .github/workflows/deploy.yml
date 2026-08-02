@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: 'Deploy amplify/ (auth, data, functions) as well as the web app'
+        type: boolean
+        default: true
 
 # Cancel an in-flight run if a newer commit lands on main
 concurrency:
@@ -17,9 +22,48 @@ jobs:
       AMPLIFY_APP_ID: d1yaptreocjil0
       AMPLIFY_BRANCH: main
       AWS_REGION: us-east-1
+      # A push to main deploys the backend too; a manual run can opt out to
+      # ship a frontend-only change without touching infrastructure.
+      DEPLOY_BACKEND: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.deploy_backend }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # AWS first: the backend deploy has to happen before the web bundle is
+      # built, so the bundle ships with config matching the backend it will
+      # actually talk to.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      # Deploys amplify/ (auth, data, functions) to the backend environment for
+      # this branch. Writes amplify_outputs.json, which is gitignored.
+      - name: Deploy backend
+        if: env.DEPLOY_BACKEND != 'false'
+        run: |
+          npx ampx pipeline-deploy \
+            --branch "$AMPLIFY_BRANCH" \
+            --app-id "$AMPLIFY_APP_ID"
+
+      # The app reads its config from lib/amplify_outputs.dart, not from the
+      # gitignored JSON — regenerate it so the build picks up schema changes
+      # (a new model, a changed endpoint) instead of silently shipping stale
+      # config.
+      - name: Sync Amplify config into the Dart source
+        if: env.DEPLOY_BACKEND != 'false'
+        run: npm run sync:outputs
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -37,18 +81,17 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
       - name: Build web bundle
         run: flutter build web --release
 
       - name: Zip build output
         run: cd build/web && zip -rq ../../web.zip .
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
 
       - name: Create Amplify deployment
         id: deployment
