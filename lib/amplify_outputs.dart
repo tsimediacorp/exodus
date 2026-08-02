@@ -1,8 +1,3 @@
-// GENERATED — do not edit by hand.
-//
-// Mirrors amplify_outputs.json (which is gitignored) so the app has its
-// backend config in a fresh clone and in CI. Regenerate after any deploy:
-//   npm run sync:outputs
 const amplifyConfig = r'''{
   "auth": {
     "user_pool_id": "us-east-1_4n7wR1LTu",
