@@ -6,7 +6,9 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import '../config/bible_prompt.dart';
 import '../models/chat_message.dart';
 import '../services/ai_service.dart';
+import '../services/progress.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/progress_view.dart';
 
 /// EXODUS explaining a passage the couple selected in the reader. Streams so
 /// the answer starts appearing immediately rather than after a long wait.
@@ -31,6 +33,7 @@ class BibleExplainSheet extends StatefulWidget {
 
 class _BibleExplainSheetState extends State<BibleExplainSheet> {
   final AiService _ai = AiService();
+  final ProgressController _status = ProgressController();
   StreamSubscription<String>? _sub;
 
   String _answer = '';
@@ -47,6 +50,7 @@ class _BibleExplainSheetState extends State<BibleExplainSheet> {
   void dispose() {
     _sub?.cancel();
     _ai.dispose();
+    _status.dispose();
     super.dispose();
   }
 
@@ -57,6 +61,9 @@ class _BibleExplainSheetState extends State<BibleExplainSheet> {
       _error = null;
     });
     _sub?.cancel();
+    _status.begin(widget.question == null
+        ? 'Reading ${widget.reference}…'
+        : 'Considering your question…');
     _sub = _ai
         .askStream(
           userMessage: BiblePrompt.explain(
@@ -65,12 +72,14 @@ class _BibleExplainSheetState extends State<BibleExplainSheet> {
             question: widget.question,
           ),
           history: const <ChatMessage>[],
+          progress: _status,
         )
         .listen(
           (chunk) {
             if (mounted) setState(() => _answer += chunk);
           },
           onError: (e) {
+            _status.done();
             if (mounted) {
               setState(() {
                 _streaming = false;
@@ -79,6 +88,7 @@ class _BibleExplainSheetState extends State<BibleExplainSheet> {
             }
           },
           onDone: () {
+            _status.done();
             if (mounted) setState(() => _streaming = false);
           },
           cancelOnError: true,
@@ -158,13 +168,7 @@ class _BibleExplainSheetState extends State<BibleExplainSheet> {
                 if (_error != null)
                   _errorBlock()
                 else if (_answer.isEmpty && _streaming)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 28),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                          color: ExodusTheme.brass, strokeWidth: 2),
-                    ),
-                  )
+                  ProgressView(controller: _status, padding: 20)
                 else
                   GptMarkdown(
                     _answer,

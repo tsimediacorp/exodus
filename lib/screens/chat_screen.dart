@@ -7,11 +7,13 @@ import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
 import '../services/memory_service.dart';
+import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/progress_view.dart';
 import 'settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -31,6 +33,7 @@ class ChatScreenState extends State<ChatScreen> {
   final MemoryService _memory = MemoryService();
   final StorageService _storage = StorageService.instance;
   final ImagePicker _picker = ImagePicker();
+  final ProgressController _status = ProgressController();
 
   List<Conversation> _conversations = [];
   Conversation? _current;
@@ -100,6 +103,7 @@ class ChatScreenState extends State<ChatScreen> {
     _input.removeListener(_saveDraft);
     _input.dispose();
     _scroll.dispose();
+    _status.dispose();
     _ai.dispose();
     _memory.dispose();
     super.dispose();
@@ -123,6 +127,7 @@ class ChatScreenState extends State<ChatScreen> {
   void _stopGenerating() {
     if (!_sending) return;
     HapticFeedback.lightImpact();
+    _status.done();
     _stopRequested = true;
     _activeStream?.cancel();
     _activeStream = null;
@@ -334,8 +339,15 @@ class ChatScreenState extends State<ChatScreen> {
     final stopwatch = Stopwatch()..start();
 
     try {
+      _status.begin(images.isEmpty
+          ? 'Sending to EXODUS…'
+          : 'Sending with ${images.length} image${images.length == 1 ? '' : 's'}…');
       _activeStream = _ai
-          .askStream(userMessage: prompt, history: history, images: images)
+          .askStream(
+              userMessage: prompt,
+              history: history,
+              images: images,
+              progress: _status)
           .listen(
         (chunk) {
           setState(() {
@@ -396,6 +408,7 @@ class ChatScreenState extends State<ChatScreen> {
         replyMsg.isLoading = false;
         replyMsg.responseTimeMs = stopwatch.elapsedMilliseconds;
       });
+      _status.done();
       _activeStream = null;
       _activeCompleter = null;
       conv.updatedAt = DateTime.now();
@@ -677,6 +690,20 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildInputBar() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_sending)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: ProgressStrip(controller: _status),
+          ),
+        _composer(),
+      ],
+    );
+  }
+
+  Widget _composer() {
     return Container(
       decoration: const BoxDecoration(
         color: ExodusTheme.obsidian,

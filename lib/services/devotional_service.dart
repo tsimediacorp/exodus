@@ -6,6 +6,7 @@ import '../config/devotional_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/devotional.dart';
 import 'ai_service.dart';
+import 'progress.dart';
 
 /// Generates daily devotionals. Routes through [AiService], so the system
 /// prompt is always `MasterPrompt.build()` — the devotional is EXODUS, grounded
@@ -38,6 +39,7 @@ class DevotionalService {
     required String goal,
     DateTime? forDay,
     List<String> recentRefs = const [],
+    ProgressController? progress,
   }) async {
     final day = forDay ?? DateTime.now();
     lastGenerateError = null;
@@ -51,7 +53,12 @@ class DevotionalService {
           history: const <ChatMessage>[],
           maxTokens: 4000,
           timeout: const Duration(seconds: 30),
+          progress: progress,
+          workingMessage: forDay == null
+              ? 'Writing today\'s devotional…'
+              : 'Writing tomorrow\'s devotional…',
         );
+        progress?.stage('Shaping the reflection…');
         final json = _extractJson(raw);
         final devo = Devotional.fromGenerated(day: day, json: json, goal: goal);
         // Accept only if we got real content; otherwise retry / fall back.
@@ -65,6 +72,8 @@ class DevotionalService {
         lastError = e;
       }
       if (attempt < maxAttempts - 1) {
+        progress?.stage('That came back incomplete — trying again…',
+            attempt: 2, maxAttempts: maxAttempts);
         await Future.delayed(const Duration(milliseconds: 600));
       }
     }
@@ -104,12 +113,15 @@ class DevotionalService {
   /// [AiService.ask] returns `''` *without throwing* when a reasoning model
   /// spends its whole budget on hidden reasoning, so callers must treat an
   /// empty result as a failure rather than assuming success.
-  Future<String> summarizeGoal(List<ChatMessage> conversation) async {
+  Future<String> summarizeGoal(List<ChatMessage> conversation,
+      {ProgressController? progress}) async {
     final line = await _ai.ask(
       userMessage: DevotionalPrompt.goalSummaryTask(),
       history: conversation,
       maxTokens: 1500,
       timeout: const Duration(seconds: 30),
+      progress: progress,
+      workingMessage: 'Distilling your goal…',
     );
     return line.trim().replaceAll(RegExp(r'^["“]|["”]$'), '').trim();
   }

@@ -9,7 +9,9 @@ import '../models/bible_ref.dart';
 import '../models/chat_message.dart';
 import '../services/ai_service.dart';
 import '../services/bible_service.dart';
+import '../services/progress.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/progress_view.dart';
 
 /// What the reader gets back when the couple picks a search result.
 class BibleSearchResult {
@@ -46,6 +48,7 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
   final BibleService _bible = BibleService.instance;
   final AiService _ai = AiService();
   final TextEditingController _input = TextEditingController();
+  final ProgressController _progress = ProgressController();
 
   bool _aiMode = true;
   bool _busy = false;
@@ -57,6 +60,7 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
   void dispose() {
     _input.dispose();
     _ai.dispose();
+    _progress.dispose();
     super.dispose();
   }
 
@@ -71,15 +75,24 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
       _hits = const [];
     });
     try {
+      _progress.begin(
+        _bible.isLoaded
+            ? 'Preparing…'
+            : 'Loading the ${BibleService.translation}…',
+        step: 1,
+        totalSteps: _aiMode ? 3 : 2,
+      );
       await _bible.load();
       final hits = _aiMode ? await _askExodus(query) : _searchText(query);
       if (!mounted) return;
+      _progress.done();
       setState(() {
         _hits = hits;
         _busy = false;
       });
     } catch (e) {
       if (!mounted) return;
+      _progress.done();
       setState(() {
         _busy = false;
         _error = _friendly(e);
@@ -92,12 +105,17 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
   /// put words in scripture's mouth — and any reference it invents is dropped
   /// here when it fails to resolve.
   Future<List<_Hit>> _askExodus(String query) async {
+    // Stage 2 of 3 — AiService narrates the round-trip and any retries.
+    _progress.stage('Asking EXODUS which passages speak to this…',
+        step: 2, totalSteps: 3);
     final raw = await _ai.ask(
       userMessage: BiblePrompt.search(query,
           translation: BibleService.translation),
       history: const <ChatMessage>[],
       maxTokens: 1200,
       timeout: const Duration(seconds: 30),
+      progress: _progress,
+      workingMessage: 'Asking EXODUS which passages speak to this…',
     );
     final start = raw.indexOf('[');
     final end = raw.lastIndexOf(']');
@@ -108,6 +126,12 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
     } catch (_) {
       return const [];
     }
+
+    _progress.stage(
+        'Looking up ${parsed.length} passage${parsed.length == 1 ? '' : 's'} '
+        'in the ${BibleService.translation}…',
+        step: 3,
+        totalSteps: 3);
 
     final hits = <_Hit>[];
     for (final item in parsed) {
@@ -131,6 +155,7 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
   }
 
   List<_Hit> _searchText(String query) {
+    _progress.stage('Scanning all 31,100 verses…', step: 2, totalSteps: 2);
     return _bible
         .searchText(query, limit: 80)
         .map((ref) => _Hit(
@@ -249,20 +274,7 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
       );
     }
     if (_busy) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: ExodusTheme.brass),
-            const SizedBox(height: 16),
-            Text(
-              _aiMode ? 'Searching the scriptures…' : 'Looking…',
-              style: const TextStyle(
-                  color: ExodusTheme.ironMist, fontSize: 13),
-            ),
-          ],
-        ),
-      );
+      return SingleChildScrollView(child: ProgressView(controller: _progress));
     }
     if (!_searched) return _hint();
     if (_hits.isEmpty) {

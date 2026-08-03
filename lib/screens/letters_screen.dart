@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/marriage_letter.dart';
 import '../services/letter_service.dart';
+import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
+import '../widgets/progress_view.dart';
 
 /// The weekly letters EXODUS writes the couple, newest first, plus a card for
 /// the week just gone that shows what would feed it before spending a request.
@@ -17,6 +19,7 @@ class LettersScreen extends StatefulWidget {
 class _LettersScreenState extends State<LettersScreen> {
   final StorageService _storage = StorageService.instance;
   final LetterService _service = LetterService();
+  final ProgressController _status = ProgressController();
 
   List<MarriageLetter> _letters = const [];
   bool _busy = false;
@@ -35,6 +38,7 @@ class _LettersScreenState extends State<LettersScreen> {
   @override
   void dispose() {
     _service.dispose();
+    _status.dispose();
     super.dispose();
   }
 
@@ -45,8 +49,9 @@ class _LettersScreenState extends State<LettersScreen> {
       _busy = true;
       _error = null;
     });
-    final letter = await _service.generate(weekStart);
+    final letter = await _service.generate(weekStart, progress: _status);
     if (!mounted) return;
+    _status.done();
     setState(() {
       _busy = false;
       _error = letter == null ? _service.lastError : null;
@@ -76,6 +81,10 @@ class _LettersScreenState extends State<LettersScreen> {
                   color: ExodusTheme.ironMist, fontSize: 14, height: 1.5),
             ),
             const SizedBox(height: 20),
+            if (_busy) ...[
+              ProgressStrip(controller: _status),
+              const SizedBox(height: 12),
+            ],
             if (existing == null) _composeCard(),
             if (_error != null) ...[
               const SizedBox(height: 12),

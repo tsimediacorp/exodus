@@ -5,7 +5,9 @@ import '../config/devotional_prompt.dart';
 import '../models/chat_message.dart';
 import '../services/ai_service.dart';
 import '../services/devotional_service.dart';
+import '../services/progress.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/progress_view.dart';
 
 /// Conversational goal intake. EXODUS interviews the couple to draw out one
 /// clear devotional goal. Returns the agreed goal string via Navigator.pop,
@@ -21,6 +23,7 @@ class DevotionalGoalScreen extends StatefulWidget {
 class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
   final AiService _ai = AiService();
   final DevotionalService _devo = DevotionalService();
+  final ProgressController _status = ProgressController();
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
@@ -43,6 +46,7 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
   void dispose() {
     _ai.dispose();
     _devo.dispose();
+    _status.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -121,10 +125,12 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
     String goal = '';
     var failed = false;
     try {
-      goal = await _devo.summarizeGoal(_messages);
+      _status.begin('Reading your conversation…');
+      goal = await _devo.summarizeGoal(_messages, progress: _status);
     } catch (_) {
       failed = true;
     } finally {
+      _status.done();
       if (mounted) setState(() => _busy = false);
     }
     if (!mounted) return;
@@ -235,6 +241,11 @@ class _DevotionalGoalScreenState extends State<DevotionalGoalScreen> {
                 itemBuilder: (_, i) => _bubble(_messages[i]),
               ),
             ),
+            if (_busy)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: ProgressStrip(controller: _status),
+              ),
             _inputBar(),
           ],
         ),

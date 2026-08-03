@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import '../models/devotional.dart';
 import '../models/journey.dart';
 import '../services/journey_service.dart';
+import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/devotional_content.dart';
+import '../widgets/progress_view.dart';
 
 /// One day of a guided plan. Generates the day on first open, then reads it
 /// back from storage — so a plan the couple has walked stays readable offline.
@@ -23,6 +25,11 @@ class JourneyDayScreen extends StatefulWidget {
 class _JourneyDayScreenState extends State<JourneyDayScreen> {
   final StorageService _storage = StorageService.instance;
   final JourneyService _service = JourneyService();
+
+  /// Live status shown while a day is being written. Named [_status] to keep
+  /// it distinct from [_progress], which is the couple's progress THROUGH the
+  /// plan — two different meanings of the word.
+  final ProgressController _status = ProgressController();
 
   late int _day = widget.day;
   late JourneyProgress _progress;
@@ -47,6 +54,7 @@ class _JourneyDayScreenState extends State<JourneyDayScreen> {
     _generation++;
     TtsService.instance.stop();
     _service.dispose();
+    _status.dispose();
     super.dispose();
   }
 
@@ -70,12 +78,21 @@ class _JourneyDayScreenState extends State<JourneyDayScreen> {
       _error = null;
       _content = null;
     });
+    _status.begin(
+      targetDay == 1
+          ? 'Opening ${widget.journey.title}…'
+          : 'Picking up where day ${targetDay - 1} left off…',
+    );
+
     final day = await _service.generateDay(
       journey: widget.journey,
       dayNumber: targetDay,
       progress: _progress,
+      status: _status,
     );
+
     if (gen != _generation || !mounted) return;
+    _status.done();
     if (day == null) {
       setState(() {
         _busy = false;
@@ -173,18 +190,7 @@ class _JourneyDayScreenState extends State<JourneyDayScreen> {
                   _dayStrip(),
                   const SizedBox(height: 20),
                   if (_busy)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 64),
-                      child: Column(
-                        children: [
-                          CircularProgressIndicator(color: ExodusTheme.brass),
-                          SizedBox(height: 16),
-                          Text('Writing this day for you…',
-                              style: TextStyle(
-                                  color: ExodusTheme.ironMist, fontSize: 13)),
-                        ],
-                      ),
-                    )
+                    ProgressView(controller: _status)
                   else if (_error != null)
                     _errorCard()
                   else if (_content != null)

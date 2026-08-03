@@ -7,6 +7,7 @@ import '../models/devotional.dart';
 import '../models/marriage_letter.dart';
 import 'ai_service.dart';
 import 'memory_store.dart';
+import 'progress.dart';
 import 'storage_service.dart';
 
 /// What the couple actually did in a given week, gathered from local storage.
@@ -145,10 +146,14 @@ class LetterService {
 
   /// Write and persist the letter for [weekStart]. Returns null on failure —
   /// [lastError] then explains why.
-  Future<MarriageLetter?> generate(DateTime weekStart) async {
+  Future<MarriageLetter?> generate(DateTime weekStart,
+      {ProgressController? progress}) async {
     lastError = null;
     final start = MarriageLetter.startOfWeek(weekStart);
+    progress?.begin('Gathering your week…', step: 1, totalSteps: 2);
     final basis = gather(start);
+    progress?.stage(
+        'Reading ${basis.summary.toLowerCase()}…', step: 1, totalSteps: 2);
     final letter = MarriageLetter(
       weekStart: start,
       body: '',
@@ -165,6 +170,8 @@ class LetterService {
         history: const <ChatMessage>[],
         maxTokens: 2000,
         timeout: const Duration(seconds: 45),
+        progress: progress,
+        workingMessage: 'Writing your letter…',
       );
       if (body.trim().isEmpty) {
         lastError = 'EXODUS returned an empty letter. Try again.';

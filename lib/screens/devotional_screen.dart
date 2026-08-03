@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../models/devotional.dart';
 import '../services/devotional_service.dart';
 import '../services/notification_service.dart';
+import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/devotional_content.dart';
 import '../widgets/exodus_shield.dart';
+import '../widgets/progress_view.dart';
 import 'devotional_goal_screen.dart';
 import 'journeys_screen.dart';
 import 'saved_verses_screen.dart';
@@ -26,6 +28,7 @@ class DevotionalScreen extends StatefulWidget {
 class _DevotionalScreenState extends State<DevotionalScreen> {
   final StorageService _storage = StorageService.instance;
   final DevotionalService _devo = DevotionalService();
+  final ProgressController _status = ProgressController();
 
   DevotionalGoal? _goal;
   Devotional? _today;
@@ -50,6 +53,7 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
     _generation++;
     TtsService.instance.stop();
     _devo.dispose();
+    _status.dispose();
     super.dispose();
   }
 
@@ -116,8 +120,10 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       }
     });
 
+    _status.begin('Reading your goal…');
     try {
-      final d = await _devo.generate(goal: goal.text, recentRefs: _recentRefs());
+      final d = await _devo.generate(
+          goal: goal.text, recentRefs: _recentRefs(), progress: _status);
       if (gen != _generation) return; // superseded — don't clobber the new goal
       await _storage.saveDevotional(d);
       if (!mounted) return;
@@ -131,6 +137,7 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
       if (gen != _generation) return;
       if (mounted) setState(() => _error = '$e'.replaceFirst('Exception: ', ''));
     } finally {
+      if (gen == _generation) _status.done();
       // Always release the UI, even when superseded — a newer run owns the
       // flag from here, and it sets _busy itself.
       if (mounted && gen == _generation) setState(() => _busy = false);
@@ -286,11 +293,12 @@ class _DevotionalScreenState extends State<DevotionalScreen> {
             _errorCard(),
             const SizedBox(height: 20),
           ],
+          if (_busy && _today != null) ...[
+            ProgressStrip(controller: _status),
+            const SizedBox(height: 16),
+          ],
           if (_busy && _today == null)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
-              child: Center(child: CircularProgressIndicator(color: ExodusTheme.brass)),
-            )
+            ProgressView(controller: _status)
           else if (_today != null)
             _devotionalCard(_today!),
         ],

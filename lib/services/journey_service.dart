@@ -6,6 +6,7 @@ import '../models/chat_message.dart';
 import '../models/devotional.dart';
 import '../models/journey.dart';
 import 'ai_service.dart';
+import 'progress.dart';
 
 /// Generates the day-by-day content of a guided [Journey].
 ///
@@ -25,6 +26,7 @@ class JourneyService {
     required Journey journey,
     required int dayNumber,
     required JourneyProgress progress,
+    ProgressController? status,
   }) async {
     lastError = null;
     const maxAttempts = 2;
@@ -50,6 +52,9 @@ class JourneyService {
           history: const <ChatMessage>[],
           maxTokens: 4000,
           timeout: const Duration(seconds: 30),
+          progress: status,
+          workingMessage:
+              'Writing day $dayNumber of ${journey.totalDays}…',
         );
         final day = Devotional.fromGenerated(
           // Journey days are plan-relative, not calendar days. The date is
@@ -67,6 +72,8 @@ class JourneyService {
         lastFailure = e;
       }
       if (attempt < maxAttempts - 1) {
+        status?.stage('That came back incomplete — trying again…',
+            attempt: 2, maxAttempts: maxAttempts);
         await Future.delayed(const Duration(milliseconds: 600));
       }
     }

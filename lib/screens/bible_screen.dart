@@ -5,8 +5,10 @@ import '../config/bible_books.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
 import '../services/bible_service.dart';
+import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/progress_view.dart';
 import '../widgets/verse_card.dart';
 import 'bible_explain_sheet.dart';
 import 'bible_search_screen.dart';
@@ -34,6 +36,7 @@ class _BibleScreenState extends State<BibleScreen> {
   final BibleService _bible = BibleService.instance;
   final StorageService _storage = StorageService.instance;
   final ScrollController _scroll = ScrollController();
+  final ProgressController _status = ProgressController();
 
   /// One key per verse in the current chapter, so a deep-linked verse can be
   /// scrolled into view. Chapters top out at 176 verses (Psalm 119), so the
@@ -64,13 +67,20 @@ class _BibleScreenState extends State<BibleScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _status.dispose();
     super.dispose();
   }
 
   Future<void> _open() async {
     try {
+      // Parsing 4.5MB of scripture takes a beat on first open; say what is
+      // happening rather than showing a bare spinner.
+      _status.begin(_bible.isLoaded
+          ? 'Opening…'
+          : 'Loading the ${BibleService.translation} — all 66 books…');
       await _bible.load();
       if (!mounted) return;
+      _status.done();
       final target = widget.initialRef == null
           ? null
           : _bible.resolve(widget.initialRef!);
@@ -85,6 +95,7 @@ class _BibleScreenState extends State<BibleScreen> {
       if (_highlight != null) _scrollToHighlight();
     } catch (e) {
       if (!mounted) return;
+      _status.done();
       setState(() {
         _loading = false;
         _loadError = '$e'.replaceFirst('Exception: ', '');
@@ -320,17 +331,7 @@ class _BibleScreenState extends State<BibleScreen> {
 
   Widget _body() {
     if (_loading) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: ExodusTheme.brass),
-            SizedBox(height: 16),
-            Text('Opening the Bible…',
-                style: TextStyle(color: ExodusTheme.ironMist, fontSize: 13)),
-          ],
-        ),
-      );
+      return Center(child: ProgressView(controller: _status));
     }
     if (_loadError != null) {
       return Center(
