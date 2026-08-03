@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import '../config/bible_books.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
+import '../services/bible_paginator.dart';
 import '../services/bible_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/page_flip.dart';
 import '../widgets/progress_view.dart';
 import '../widgets/verse_card.dart';
 import 'bible_explain_sheet.dart';
@@ -57,6 +59,104 @@ class _BibleScreenState extends State<BibleScreen> {
   /// 1-based verse numbers the couple has tapped to select.
   final Set<int> _selected = <int>{};
 
+  // ---- Paged reading ----
+
+  /// Page mode is the default — the reader is meant to feel like a book.
+  /// Scrolling stays available for anyone who prefers it.
+  late bool _paged = _storage.loadBiblePagedMode();
+
+  final PageController _pageController = PageController();
+  List<BiblePage> _pages = const [];
+  int _pageIndex = 0;
+
+  /// Inputs the current pagination was computed for. Re-measuring 31,100
+  /// verses on every rebuild would be wasteful, so it only recomputes when
+  /// the chapter, viewport or text scale actually changes.
+  String? _paginatedFor;
+
+  /// A verse to land on once pages exist — set by a deep link, consumed on
+  /// the first pagination pass.
+  int? _pendingVerseJump;
+
+  /// Recompute pages if anything they depend on has changed.
+  void _repaginate(List<String> verses, Size area, TextScaler scaler) {
+    final key = '$_bookIndex/$_chapter/${area.width.round()}x'
+        '${area.height.round()}/${scaler.scale(100).round()}';
+    if (key == _paginatedFor) return;
+
+    final pages = BiblePaginator.paginate(
+      verses: verses,
+      size: area,
+      verseTextStyle: _verseTextStyle,
+      verseNumberStyle: _verseNumberStyle,
+      verseSpacing: _verseSpacing,
+      textScaler: scaler,
+    );
+
+    // Keep the reader on the verse they were looking at, rather than snapping
+    // to page one whenever the viewport changes.
+    final anchor = _pendingVerseJump ??
+        (_pages.isEmpty || _pageIndex >= _pages.length
+            ? null
+            : _pages[_pageIndex].firstVerse);
+    final target = anchor == null
+        ? 0
+        : BiblePaginator.pageIndexOf(pages, anchor);
+
+    _pages = pages;
+    _pageIndex = target.clamp(0, pages.length - 1);
+    _paginatedFor = key;
+    _pendingVerseJump = null;
+
+    // Jump after the frame — the controller has no clients until PageView
+    // has been laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageController.hasClients) return;
+      if (_pageController.page?.round() != _pageIndex) {
+        _pageController.jumpToPage(_pageIndex);
+      }
+    });
+  }
+
+  void _onPageChanged(int i) {
+    // A light tick per page, the way a real page has a sound.
+    HapticFeedback.selectionClick();
+    setState(() => _pageIndex = i);
+  }
+
+  /// Swap between turning pages and continuous scrolling. Persisted, because
+  /// this is a taste preference and re-choosing it every session is friction.
+  Future<void> _toggleReadingMode() async {
+    HapticFeedback.selectionClick();
+    // Keep the reader where they were: remember the verse currently on screen
+    // so the other mode opens at the same place.
+    final anchor = _paged && _pageIndex < _pages.length
+        ? _pages[_pageIndex].firstVerse
+        : _highlight?.verseStart;
+    setState(() {
+      _paged = !_paged;
+      _paginatedFor = null;
+      if (anchor != null) _pendingVerseJump = anchor;
+    });
+    await _storage.saveBiblePagedMode(_paged);
+  }
+
+  static const TextStyle _verseTextStyle = TextStyle(
+    color: ExodusTheme.porcelain,
+    fontSize: 16,
+    height: 1.7,
+  );
+
+  static const TextStyle _verseNumberStyle = TextStyle(
+    color: ExodusTheme.ironMist,
+    fontSize: 11,
+    fontWeight: FontWeight.w700,
+    height: 1.7,
+  );
+
+  /// Must match the vertical space _verseRow adds around each verse.
+  static const double _verseSpacing = 16;
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +167,7 @@ class _BibleScreenState extends State<BibleScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _pageController.dispose();
     _status.dispose();
     super.dispose();
   }
@@ -106,6 +207,24 @@ class _BibleScreenState extends State<BibleScreen> {
   void _scrollToHighlight() {
     final start = _highlight?.verseStart;
     if (start == null) return;
+    if (_paged) {
+      // Pages may not be measured yet (first open); park the target and let
+      // the pagination pass land on it.
+      if (_pages.isEmpty) {
+        _pendingVerseJump = start;
+      } else {
+        final target = BiblePaginator.pageIndexOf(_pages, start);
+        setState(() => _pageIndex = target);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _pageController.hasClients) {
+            _pageController.animateToPage(target,
+                duration: const Duration(milliseconds: 420),
+                curve: Curves.easeOutCubic);
+          }
+        });
+      }
+      return;
+    }
     // After the frame, so the verse's key has a render object to scroll to.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -156,8 +275,11 @@ class _BibleScreenState extends State<BibleScreen> {
       _highlight = null;
       _note = null;
       _selected.clear();
+      _pageIndex = 0;
+      _paginatedFor = null; // force a re-measure for the new chapter
     });
     if (_scroll.hasClients) _scroll.jumpTo(0);
+    if (_paged && _pageController.hasClients) _pageController.jumpToPage(0);
   }
 
   void _changeChapter(int delta) {
@@ -318,6 +440,13 @@ class _BibleScreenState extends State<BibleScreen> {
               ),
         actions: [
           IconButton(
+            tooltip: _paged ? 'Switch to scrolling' : 'Switch to pages',
+            icon: Icon(
+                _paged ? Icons.menu_book_rounded : Icons.view_stream_rounded,
+                color: ExodusTheme.ironMist),
+            onPressed: _loading ? null : _toggleReadingMode,
+          ),
+          IconButton(
             tooltip: 'Ask EXODUS to find a passage',
             icon: const Icon(Icons.auto_awesome, color: ExodusTheme.covenantGlow),
             onPressed: _loading ? null : _search,
@@ -365,24 +494,160 @@ class _BibleScreenState extends State<BibleScreen> {
 
     final verses = _verses;
     _verseKeys.clear();
+
+    if (!_paged) {
+      return Column(
+        children: [
+          if (_note != null) _noteBanner(_note!),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < verses.length; i++)
+                    _verseRow(i + 1, verses[i]),
+                  _chapterNav(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       children: [
         if (_note != null) _noteBanner(_note!),
         Expanded(
-          child: SingleChildScrollView(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < verses.length; i++)
-                  _verseRow(i + 1, verses[i]),
-                _chapterNav(),
-              ],
-            ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Pages depend on the viewport and the reader's text scale, so
+              // they are measured here and recomputed when either changes —
+              // a rotation or an accessibility change must not leave verses
+              // stranded off the bottom of a page.
+              final scaler = MediaQuery.textScalerOf(context);
+              final area = Size(
+                constraints.maxWidth - 40, // horizontal padding
+                constraints.maxHeight - 56, // vertical padding + footer
+              );
+              _repaginate(verses, area, scaler);
+
+              return Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pageController,
+                    physics: const PageTurnPhysics(),
+                    itemCount: _pages.length,
+                    onPageChanged: _onPageChanged,
+                    itemBuilder: (context, i) {
+                      final page = _pages[i];
+                      return AnimatedBuilder(
+                        animation: _pageController,
+                        builder: (context, child) {
+                          // Fall back to the settled index before the
+                          // controller has dimensions (first frame).
+                          final position = _pageController.hasClients &&
+                                  _pageController.position.hasContentDimensions
+                              ? (_pageController.page ?? _pageIndex.toDouble())
+                              : _pageIndex.toDouble();
+                          return PageFlip(
+                              index: i, page: position, child: child!);
+                        },
+                        child: _pageContent(page, verses),
+                      );
+                    },
+                  ),
+                  const SpineShadow(),
+                ],
+              );
+            },
           ),
         ),
+        _pageFooter(),
       ],
+    );
+  }
+
+  /// One page of verses, laid out top-aligned like a printed page.
+  Widget _pageContent(BiblePage page, List<String> verses) {
+    return Container(
+      color: ExodusTheme.obsidian,
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var v = page.firstVerse; v <= page.lastVerse; v++)
+            if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
+        ],
+      ),
+    );
+  }
+
+  /// Page position plus chapter stepping, so the couple is never stuck at the
+  /// end of a chapter with nowhere to go.
+  Widget _pageFooter() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      decoration: const BoxDecoration(
+        color: ExodusTheme.obsidian,
+        border: Border(top: BorderSide(color: ExodusTheme.steel)),
+      ),
+      child: Row(
+        children: [
+          _footerButton(
+            icon: Icons.chevron_left,
+            label: 'Previous chapter',
+            onTap: (_chapter > 1 || _bookIndex > 0)
+                ? () => _changeChapter(-1)
+                : null,
+          ),
+          Expanded(
+            child: Text(
+              _pages.length <= 1
+                  ? '$_bookName $_chapter'
+                  : 'Page ${_pageIndex + 1} of ${_pages.length}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: ExodusTheme.ironMist,
+                fontSize: 12,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          _footerButton(
+            icon: Icons.chevron_right,
+            label: 'Next chapter',
+            onTap: (_chapter < _chapterCount ||
+                    _bookIndex < _bible.books.length - 1)
+                ? () => _changeChapter(1)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _footerButton({
+    required IconData icon,
+    required String label,
+    VoidCallback? onTap,
+  }) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon,
+              size: 22,
+              color: onTap == null ? ExodusTheme.steel : ExodusTheme.ironMist),
+        ),
+      ),
     );
   }
 

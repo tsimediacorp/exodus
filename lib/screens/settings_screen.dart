@@ -17,6 +17,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late double _temperature;
   late int _maxTokens;
   String? _maxTokensError;
+  late bool _checkInsEnabled = StorageService.instance.loadCheckInsEnabled();
   late String _provider;
 
   @override
@@ -116,8 +117,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _temperatureSlider(),
             const SizedBox(height: 16),
             _maxTokensField(),
+            const SizedBox(height: 28),
+            _sectionHeader('CHECK-INS'),
+            _checkInToggle(),
           ],
         ),
+      ),
+    );
+  }
+
+  /// EXODUS reads stored memory to decide what to follow up on, so this has to
+  /// be refusable — and saves immediately rather than waiting for Save, since
+  /// turning it off is the kind of thing someone wants to take effect now.
+  Widget _checkInToggle() {
+    return SwitchListTile(
+      value: _checkInsEnabled,
+      onChanged: (v) async {
+        setState(() => _checkInsEnabled = v);
+        await StorageService.instance.saveCheckInsEnabled(v);
+      },
+      contentPadding: EdgeInsets.zero,
+      activeThumbColor: ExodusTheme.covenantGlow,
+      title: const Text('Let EXODUS follow up',
+          style: TextStyle(color: ExodusTheme.porcelain, fontSize: 15)),
+      subtitle: const Text(
+        'Looks back over what you have shared and checks in on things left '
+        'unresolved. At most one at a time, never sooner than a few days apart.',
+        style: TextStyle(color: ExodusTheme.ironMist, fontSize: 12, height: 1.4),
       ),
     );
   }

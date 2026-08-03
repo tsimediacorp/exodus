@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
+import '../models/check_in.dart';
 import '../models/coaching_session.dart';
 import '../models/conversation.dart';
 import '../models/devotional.dart';
@@ -39,10 +40,14 @@ class StorageService {
   static const _kMemory            = 'exodus.memory.items';
   static const _kComposerDraft     = 'exodus.composer.draft';
   static const _kReaderFontSize    = 'exodus.reader.fontSize';
+  static const _kBiblePaged        = 'exodus.bible.pagedMode';
   static const _kJourneys          = 'exodus.journeys.progress';
   static const _kActionDays        = 'exodus.devotional.actionDays';
   static const _kSavedVerses       = 'exodus.verses.saved';
   static const _kLetters           = 'exodus.letters';
+  static const _kCheckIns          = 'exodus.checkIns';
+  static const _kCheckInScan       = 'exodus.checkIns.lastScan';
+  static const _kCheckInsEnabled   = 'exodus.checkIns.enabled';
 
   Future<void> init() async {
     try {
@@ -274,6 +279,50 @@ class StorageService {
         _kLetters, jsonEncode(all.map((l) => l.toJson()).toList()));
   }
 
+  // ---------------- Check-ins ----------------
+
+  List<CheckIn> loadCheckIns() {
+    final raw = _prefs?.getString(_kCheckIns);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>)
+          .map((e) => CheckIn.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Insert or replace by id.
+  Future<void> saveCheckIn(CheckIn checkIn) async {
+    final all = loadCheckIns()
+      ..removeWhere((c) => c.id == checkIn.id)
+      ..add(checkIn);
+    await _prefs?.setString(
+        _kCheckIns, jsonEncode(all.map((c) => c.toJson()).toList()));
+  }
+
+  Future<void> deleteCheckIn(String id) async {
+    final all = loadCheckIns()..removeWhere((c) => c.id == id);
+    await _prefs?.setString(
+        _kCheckIns, jsonEncode(all.map((c) => c.toJson()).toList()));
+  }
+
+  /// Whether EXODUS may follow up unprompted. On by default, but this reads
+  /// the couple's history to decide what to raise, so it must be refusable.
+  bool loadCheckInsEnabled() => _prefs?.getBool(_kCheckInsEnabled) ?? true;
+
+  Future<void> saveCheckInsEnabled(bool enabled) async =>
+      _prefs?.setBool(_kCheckInsEnabled, enabled);
+
+  DateTime? loadLastCheckInScan() {
+    final raw = _prefs?.getString(_kCheckInScan);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> saveLastCheckInScan(DateTime when) async =>
+      _prefs?.setString(_kCheckInScan, when.toIso8601String());
+
   // ---------------- Composer draft ----------------
 
   /// Unsent composer text, so a force-quit mid-compose doesn't lose it.
@@ -294,6 +343,14 @@ class StorageService {
 
   Future<void> saveReaderFontSize(double size) async =>
       _prefs?.setDouble(_kReaderFontSize, size);
+
+  // ---------------- Bible ----------------
+
+  /// Whether the Bible reader turns pages (true, the default) or scrolls.
+  bool loadBiblePagedMode() => _prefs?.getBool(_kBiblePaged) ?? true;
+
+  Future<void> saveBiblePagedMode(bool paged) async =>
+      _prefs?.setBool(_kBiblePaged, paged);
 
   // ---------------- Devotionals ----------------
 

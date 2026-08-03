@@ -4,14 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
+import '../models/check_in.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
+import '../services/check_in_service.dart';
 import '../services/memory_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
+import '../widgets/check_in_card.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/progress_view.dart';
 import 'settings_screen.dart';
@@ -85,6 +88,11 @@ class ChatScreenState extends State<ChatScreen> {
     if (_messages.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
+    // Background, best-effort: look through memory for anything worth coming
+    // back to. Rate-limited inside the service, and silent on failure.
+    unawaited(CheckInService.instance.scan().then((added) {
+      if (added > 0 && mounted) setState(() {});
+    }));
   }
 
   /// Show the jump-to-latest arrow once the user has scrolled up from the end.
@@ -264,8 +272,18 @@ class ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _send([String? text]) async {
-    final content = (text ?? _input.text).trim();
+  /// Send a message.
+  ///
+  /// [overridePrompt] sends something other than the composer's contents.
+  /// With [silentPrompt] the prompt is sent to the model but NOT added to the
+  /// thread — used to seed a check-in, where the instruction primes EXODUS's
+  /// opening line and would be nonsense shown as a message from the couple.
+  Future<void> _send([
+    String? text,
+    String? overridePrompt,
+    bool silentPrompt = false,
+  ]) async {
+    final content = (overridePrompt ?? text ?? _input.text).trim();
     // Allow sending with images only (no text), but never an empty message.
     if ((content.isEmpty && _pendingImages.isEmpty) || _sending) return;
 
@@ -278,11 +296,12 @@ class ChatScreenState extends State<ChatScreen> {
 
     final conv = _current!;
     final images = List<String>.from(_pendingImages);
-    final userMsg =
-        ChatMessage(content: content, sender: Sender.user, images: images);
 
     setState(() {
-      conv.messages.add(userMsg);
+      if (!silentPrompt) {
+        conv.messages.add(
+            ChatMessage(content: content, sender: Sender.user, images: images));
+      }
       _input.clear();
       // The message is now in the conversation — drop the saved draft.
       _draftDebounce?.cancel();
@@ -524,6 +543,10 @@ class ChatScreenState extends State<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Something EXODUS remembered and means to come back to. Sits
+            // above the thread rather than interrupting it, and only when
+            // nothing is being sent.
+            if (!_sending) _checkInBanner(),
             Expanded(
               child: _messages.isEmpty ? _buildWelcome() : _buildMessages(),
             ),
@@ -532,6 +555,36 @@ class ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Widget _checkInBanner() {
+    final checkIn = CheckInService.instance.current;
+    if (checkIn == null) return const SizedBox.shrink();
+    return CheckInCard(
+      checkIn: checkIn,
+      onChanged: () => setState(() {}),
+      onOpen: () => _openCheckIn(checkIn),
+    );
+  }
+
+  /// Take a check-in into a fresh conversation, seeded so EXODUS opens by
+  /// naming what it remembered rather than waiting to be prompted.
+  Future<void> _openCheckIn(CheckIn checkIn) async {
+    await CheckInService.instance.markAnswered(checkIn);
+    if (!mounted) return;
+
+    _captureMemory(_current);
+    final conv = Conversation.empty()..title = 'Checking in';
+    setState(() {
+      _conversations.insert(0, conv);
+      _current = conv;
+    });
+    await _persist();
+    if (!mounted) return;
+
+    // The seed is instruction, not dialogue — it primes the reply without
+    // appearing in the thread as something the couple said.
+    await _send(null, CheckInService.instance.seedPrompt(checkIn), true);
   }
 
   Widget _buildWelcome() {
