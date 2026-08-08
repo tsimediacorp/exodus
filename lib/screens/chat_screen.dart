@@ -88,11 +88,17 @@ class ChatScreenState extends State<ChatScreen> {
     if (_messages.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
+    // The banner reads straight off the service, so it needs a nudge when the
+    // queue changes while this screen is already built — a background scan
+    // landing, or the tester forcing one from Settings.
+    CheckInService.instance.addListener(_onCheckInsChanged);
     // Background, best-effort: look through memory for anything worth coming
     // back to. Rate-limited inside the service, and silent on failure.
-    unawaited(CheckInService.instance.scan().then((added) {
-      if (added > 0 && mounted) setState(() {});
-    }));
+    unawaited(CheckInService.instance.scan());
+  }
+
+  void _onCheckInsChanged() {
+    if (mounted) setState(() {});
   }
 
   /// Show the jump-to-latest arrow once the user has scrolled up from the end.
@@ -107,6 +113,7 @@ class ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _activeStream?.cancel();
     _draftDebounce?.cancel();
+    CheckInService.instance.removeListener(_onCheckInsChanged);
     TtsService.instance.stop();
     _input.removeListener(_saveDraft);
     _input.dispose();

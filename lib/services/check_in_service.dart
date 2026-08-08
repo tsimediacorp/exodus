@@ -38,6 +38,11 @@ class CheckInService extends ChangeNotifier {
 
   List<CheckIn> get all => _storage.loadCheckIns();
 
+  /// Set by [forceScanNow] so the quiet period doesn't swallow the card it
+  /// just made due. Deliberately not persisted — it dies with the process, so
+  /// a tester can't leave the real pacing switched off by accident.
+  bool _bypassGap = false;
+
   /// The one check-in to show right now, or null if it isn't time.
   ///
   /// Returns null when: nothing is due, one was raised too recently, or the
@@ -49,7 +54,8 @@ class CheckInService extends ChangeNotifier {
         .where((c) => c.resolvedAt != null)
         .map((c) => c.resolvedAt!)
         .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
-    if (lastResolved != null &&
+    if (!_bypassGap &&
+        lastResolved != null &&
         DateTime.now().difference(lastResolved) < minGapBetweenCheckIns) {
       return null;
     }
@@ -154,6 +160,47 @@ class CheckInService extends ChangeNotifier {
     }
   }
 
+  /// Run a scan right now and make what it finds immediately raisable.
+  ///
+  /// The normal path is slow on purpose — three stored memories minimum, a
+  /// two-day scan interval, and due dates clamped at least two days out. Good
+  /// pacing in real use, but it means a fresh install never shows a check-in
+  /// and the card can't be looked at without waiting out the calendar. This
+  /// collapses that wait without changing any of the rules for normal runs.
+  Future<ForceScanResult> forceScanNow({ProgressController? progress}) async {
+    if (!_storage.loadCheckInsEnabled()) return ForceScanResult.disabled;
+    if (MemoryStore.instance.items.isEmpty) return ForceScanResult.noMemories;
+
+    final before = all.map((c) => c.id).toSet();
+    final added = await scan(progress: progress, force: true);
+
+    // Prefer something the scan just produced; fall back to anything already
+    // queued but not yet due, so a second tap still surfaces a card instead of
+    // silently doing nothing.
+    final open = all.where((c) => c.isOpen).toList()
+      ..sort((a, b) {
+        final fresh = (before.contains(a.id) ? 1 : 0) - (before.contains(b.id) ? 1 : 0);
+        return fresh != 0 ? fresh : a.dueAt.compareTo(b.dueAt);
+      });
+    if (open.isEmpty) {
+      return added > 0 ? ForceScanResult.queued : ForceScanResult.nothingFound;
+    }
+
+    final target = open.first;
+    await _storage.saveCheckIn(CheckIn(
+      id: target.id,
+      question: target.question,
+      because: target.because,
+      topic: target.topic,
+      createdAt: target.createdAt,
+      dueAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      status: CheckInStatus.pending,
+    ));
+    _bypassGap = true;
+    notifyListeners();
+    return ForceScanResult.raised;
+  }
+
   /// Parse the model's proposals and queue the ones that survive the filters.
   Future<int> _ingest(String raw) async {
     final start = raw.indexOf('[');
@@ -252,4 +299,38 @@ assume how it went.
   /// scan don't all land on the same day.
   static int jitterDays(int base) =>
       base + Random(base).nextInt(3) - 1;
+}
+
+/// Why a forced scan did or didn't put a card on screen.
+///
+/// A forced scan that finds nothing looks identical to one that failed, so the
+/// reason has to come back to the caller — otherwise the trigger is untestable
+/// for the same reason the feature was.
+enum ForceScanResult {
+  /// A card is on the Counsel screen now.
+  raised,
+
+  /// Check-ins were queued but none could be pulled forward.
+  queued,
+
+  /// The scan ran and the model proposed nothing worth asking about.
+  nothingFound,
+
+  /// Nothing in memory yet — there is nothing to follow up on.
+  noMemories,
+
+  /// The follow-up switch is off, so a card would be suppressed anyway.
+  disabled;
+
+  String get message => switch (this) {
+        raised => 'Check-in ready — open Counsel to see it.',
+        queued => 'Queued a check-in, but none was due to raise.',
+        nothingFound =>
+          'Scan ran; nothing worth following up on yet. Talk through '
+              'something first, then try again.',
+        noMemories =>
+          'No stored memories yet. EXODUS needs a real conversation to '
+              'have something to come back to.',
+        disabled => 'Turn on "Let EXODUS follow up" first.',
+      };
 }

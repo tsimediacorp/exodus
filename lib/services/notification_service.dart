@@ -26,8 +26,10 @@ class NotificationService {
     // Set the device's actual timezone so a "7am" daily notification fires at
     // 7am LOCAL (without this, tz.local defaults to UTC).
     try {
-      final name = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(name));
+      // flutter_timezone 5 returns a TimezoneInfo; `identifier` is the IANA
+      // name that tz.getLocation expects.
+      final zone = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(zone.identifier));
     } catch (_) {
       // Fall back to UTC if the platform can't report a timezone.
     }
