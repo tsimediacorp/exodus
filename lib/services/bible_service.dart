@@ -326,11 +326,25 @@ class BibleService {
 
   // ---------------- Plain-text search ----------------
 
+  /// Fold typographic punctuation to what a keyboard produces.
+  ///
+  /// The texts are typeset with curly quotes and en dashes, so a search for
+  /// "God's" — typed with a straight apostrophe — would otherwise never match
+  /// "God’s" and the reader would conclude the phrase is not in the Bible.
+  static String _fold(String s) => s
+      .toLowerCase()
+      .replaceAll('\u2019', "'")
+      .replaceAll('\u2018', "'")
+      .replaceAll('\u201C', '"')
+      .replaceAll('\u201D', '"')
+      .replaceAll('\u2013', '-')
+      .replaceAll('\u2014', '-');
+
   /// Literal substring search across the whole translation. Complements the
   /// AI search: this finds exact wording, that one finds meaning.
   List<BibleRef> searchText(String query, {int limit = 100}) {
     if (!isLoaded) return const [];
-    final needle = query.trim().toLowerCase();
+    final needle = _fold(query.trim());
     if (needle.length < 3) return const [];
     final hits = <BibleRef>[];
     for (var b = 0; b < books.length; b++) {
@@ -338,7 +352,7 @@ class BibleService {
       for (var c = 0; c < chapters.length; c++) {
         final verses = chapters[c];
         for (var v = 0; v < verses.length; v++) {
-          if (verses[v].toLowerCase().contains(needle)) {
+          if (_fold(verses[v]).contains(needle)) {
             hits.add(BibleRef(
                 bookIndex: b, chapter: c + 1, verseStart: v + 1));
             if (hits.length >= limit) return hits;
