@@ -100,8 +100,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                   constraints: const BoxConstraints(minHeight: 34),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
+                    color: ExodusTheme.brass.withValues(alpha: 0.08),
                     border: Border.all(
-                        color: ExodusTheme.brass.withValues(alpha: 0.5)),
+                        color: ExodusTheme.brass.withValues(alpha: 0.38)),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
@@ -191,12 +192,20 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// restores the formatted reply.
   Widget _content(TextStyle style) {
     final message = widget.message;
+    // SelectableText handles its own taps for text selection, so a tap landing
+    // on the words never reached the GestureDetector wrapping it — the action
+    // row only opened if you happened to hit the padding around the text.
+    // Routing through its own onTap makes the whole message tappable.
     if (widget.searchQuery.isNotEmpty) {
       return SelectableText.rich(
         TextSpan(children: _highlighted(message.content, style)),
+        onTap: _toggleActions,
       );
     }
-    if (_isUser) return SelectableText(message.content, style: style);
+    if (_isUser) {
+      return SelectableText(message.content,
+          style: style, onTap: _toggleActions);
+    }
     return GptMarkdown(message.content, style: style);
   }
 
@@ -205,7 +214,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     // 30pt between turns, which is where the breathing room comes from now
     // that neither speaker is padded inside a box.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 22),
       child: _isUser ? _userTurn(context) : _exodusTurn(context),
     );
   }
@@ -276,20 +285,30 @@ class _MessageBubbleState extends State<MessageBubble> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        // A rule, not just a label. In a reply this long the label alone
+        // scrolls away and the turn loses its start; a hairline running to the
+        // edge marks it unmistakably and gives the wall of prose a lid.
+        Row(
           children: [
-            ExodusShield(size: 17, glow: false),
-            SizedBox(width: 8),
-            Text('EXODUS',
+            const ExodusShield(size: 17, glow: false),
+            const SizedBox(width: 8),
+            const Text('EXODUS',
                 style: TextStyle(
                   color: ExodusTheme.brass,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.4,
                 )),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: ExodusTheme.brass.withValues(alpha: 0.22),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         Semantics(
           button: true,
           label: 'EXODUS reply. Tap for options.',
@@ -320,19 +339,9 @@ class _MessageBubbleState extends State<MessageBubble> {
         // rendered as markdown, and rewriting its spans would fight the
         // renderer.
         if (!message.isStreaming) _scriptureChips(),
+        // How long it took moved into the action row. Standing alone under
+        // every reply it read as debug output left switched on.
         if (_showActions && _canShowActions) _actionBar(),
-        if (!message.isStreaming && message.responseTimeMs != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              _formatElapsed(message.responseTimeMs!),
-              style: const TextStyle(
-                color: ExodusTheme.ironMist,
-                fontSize: 11,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -342,6 +351,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       padding: const EdgeInsets.only(top: 8),
       child: _ActionBar(
         isAssistant: !_isUser,
+        elapsedMs: widget.message.responseTimeMs,
         ttsKey: _ttsKey,
         onCopy: _copy,
         onPlay: () =>
@@ -366,6 +376,10 @@ class _MessageBubbleState extends State<MessageBubble> {
 
 class _ActionBar extends StatelessWidget {
   final bool isAssistant;
+
+  /// How long the reply took, shown at the end of the row. Null for user
+  /// messages and for anything still streaming.
+  final int? elapsedMs;
   final String ttsKey;
   final VoidCallback onCopy;
   final VoidCallback onPlay;
@@ -376,6 +390,7 @@ class _ActionBar extends StatelessWidget {
 
   const _ActionBar({
     required this.isAssistant,
+    required this.elapsedMs,
     required this.ttsKey,
     required this.onCopy,
     required this.onPlay,
@@ -441,6 +456,18 @@ class _ActionBar extends StatelessWidget {
           const SizedBox(width: 4),
           _ActionButton(icon: Icons.delete_outline_rounded, label: 'Delete', onTap: onDelete!),
         ],
+        if (elapsedMs != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 6, right: 10),
+            child: Text(
+              _formatElapsed(elapsedMs!),
+              style: const TextStyle(
+                color: ExodusTheme.ironMist,
+                fontSize: 11,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
       ],
         ),
       ),

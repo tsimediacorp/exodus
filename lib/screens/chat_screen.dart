@@ -656,28 +656,27 @@ class ChatScreenState extends State<ChatScreen> {
         tooltip: 'Menu',
         onPressed: widget.onOpenMenu,
       ),
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('EXODUS',
+      // One line, not two. The conversation's name IS the title once there is
+      // one — stacking it under a wordmark left both cramped and the name
+      // truncated. (It also inherited the wordmark's 3.0 letterSpacing from
+      // the app bar theme, which spaced it out like a ransom note.)
+      title: title.isEmpty
+          ? const Text('EXODUS',
               style: TextStyle(
                 color: ExodusTheme.porcelain,
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 3,
+              ))
+          : Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: ExodusTheme.porcelain,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
               )),
-          // Which conversation is open was visible only inside the drawer.
-          if (title.isNotEmpty)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 190),
-              child: Text(title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: ExodusTheme.ironMist, fontSize: 11)),
-            ),
-        ],
-      ),
       actions: [
         IconButton(
           icon: const Icon(Icons.search_rounded, color: ExodusTheme.ironMist),

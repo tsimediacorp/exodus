@@ -60,9 +60,27 @@ void main() {
       expect(find.text('EXODUS'), findsNothing);
     });
 
-    testWidgets('the reply shows how long it took', (tester) async {
+    testWidgets('how long it took is in the actions, not the thread',
+        (tester) async {
+      // It used to sit under every reply, which read as debug output left
+      // switched on. It is still available, just not shouted.
       await tester.pumpWidget(host(MessageBubble(message: exodus('Answer.'))));
+      expect(find.text('4.2s'), findsNothing);
+
+      await tester.tap(find.text('Answer.'));
+      await tester.pumpAndSettle();
       expect(find.text('4.2s'), findsOneWidget);
+    });
+
+    testWidgets('a user message shows no elapsed time at all', (tester) async {
+      await tester.pumpWidget(host(MessageBubble(
+        message: user('We fought.'),
+        onDelete: () {},
+      )));
+      await tester.tap(find.text('We fought.'));
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsOneWidget); // the row did open
+      expect(find.text('4.2s'), findsNothing);
     });
 
     testWidgets('actions stay hidden until the message is tapped',
