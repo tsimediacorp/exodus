@@ -43,6 +43,7 @@ class StorageService {
   static const _kComposerDraft     = 'exodus.composer.draft';
   static const _kReaderFontSize    = 'exodus.reader.fontSize';
   static const _kBiblePaged        = 'exodus.bible.pagedMode';
+  static const _kBibleTranslation  = 'exodus.bible.translation';
   static const _kJourneys          = 'exodus.journeys.progress';
   static const _kActionDays        = 'exodus.devotional.actionDays';
   static const _kSavedVerses       = 'exodus.verses.saved';
@@ -405,6 +406,17 @@ class StorageService {
     all.sort((a, b) => b.day.compareTo(a.day));
     await _prefs?.setString(
         _kDevotionals, jsonEncode(all.map((d) => d.toJson()).toList()));
+  }
+
+  // ---------------- Bible translation ----------------
+
+  /// The translation id last chosen, or null on a device that has never
+  /// picked. BibleService resolves an unknown id back to the default, so a
+  /// translation that is later removed from the bundle does not strand anyone.
+  String? loadBibleTranslation() => _prefs?.getString(_kBibleTranslation);
+
+  Future<void> saveBibleTranslation(String id) async {
+    await _prefs?.setString(_kBibleTranslation, id);
   }
 
   // ---------------- Bible study exercises ----------------

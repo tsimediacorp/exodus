@@ -80,8 +80,9 @@ class _BibleScreenState extends State<BibleScreen> {
 
   /// Recompute pages if anything they depend on has changed.
   void _repaginate(List<String> verses, Size area, TextScaler scaler) {
-    final key = '$_bookIndex/$_chapter/${area.width.round()}x'
-        '${area.height.round()}/${scaler.scale(100).round()}';
+    final key = '${_bible.currentTranslation.id}/$_bookIndex/$_chapter/'
+        '${area.width.round()}x${area.height.round()}/'
+        '${scaler.scale(100).round()}';
     if (key == _paginatedFor) return;
 
     final pages = BiblePaginator.paginate(
@@ -414,6 +415,114 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
+  /// Let the reader change translation. Only offered when more than one is
+  /// bundled, so a single-translation build shows no dead control.
+  Future<void> _pickTranslation() async {
+    final current = _bible.currentTranslation;
+    final chosen = await showModalBottomSheet<BibleTranslation>(
+      context: context,
+      backgroundColor: ExodusTheme.obsidian,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text('TRANSLATION',
+                  style: TextStyle(
+                    color: ExodusTheme.ironMist,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                  )),
+            ),
+            for (final t in BibleService.translations)
+              InkWell(
+                onTap: () => Navigator.pop(ctx, t),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  color: t.id == current.id
+                      ? ExodusTheme.midnight
+                      : Colors.transparent,
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 52,
+                        child: Text(t.abbrev,
+                            style: TextStyle(
+                              color: t.id == current.id
+                                  ? ExodusTheme.brass
+                                  : ExodusTheme.porcelain,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            )),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(t.name,
+                                style: const TextStyle(
+                                    color: ExodusTheme.porcelain,
+                                    fontSize: 15)),
+                            const SizedBox(height: 3),
+                            Text(t.note,
+                                style: const TextStyle(
+                                    color: ExodusTheme.ironMist,
+                                    fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      if (t.id == current.id)
+                        const Icon(Icons.check_rounded,
+                            size: 18, color: ExodusTheme.brass),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+
+    if (chosen == null || chosen.id == current.id || !mounted) return;
+
+    // Switching drops the old text and parses the new one, so the reader goes
+    // back through its loading state rather than rendering against no books.
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      _status.begin('Loading the ${chosen.abbrev} — all 66 books…');
+      await _bible.select(chosen);
+      if (!mounted) return;
+      _status.done();
+      setState(() {
+        _loading = false;
+        // Page breaks were measured against the old text. Drop them and let
+        // the next layout pass re-measure, which is the only place the
+        // viewport size is known.
+        _pages = const [];
+        _pageIndex = 0;
+        _paginatedFor = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _status.done();
+      setState(() {
+        _loading = false;
+        _loadError = '$e'.replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -439,6 +548,28 @@ class _BibleScreenState extends State<BibleScreen> {
                 ),
               ),
         actions: [
+          if (BibleService.hasChoice)
+            Semantics(
+              button: true,
+              label: 'Change translation',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _loading ? null : _pickTranslation,
+                child: Container(
+                  constraints:
+                      const BoxConstraints(minHeight: 44, minWidth: 44),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(BibleService.translation,
+                      style: const TextStyle(
+                        color: ExodusTheme.brass,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      )),
+                ),
+              ),
+            ),
           IconButton(
             tooltip: _paged ? 'Switch to scrolling' : 'Switch to pages',
             icon: Icon(

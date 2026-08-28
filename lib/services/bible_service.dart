@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../config/bible_books.dart';
 import '../models/bible_ref.dart';
+import 'storage_service.dart';
 
 /// One book of the bundled translation.
 class BibleBook {
@@ -20,42 +21,136 @@ class BibleBook {
           : const [];
 }
 
-/// The in-app Bible. Loads the bundled translation once, lazily, and answers
-/// lookups against it.
+/// One translation the app can read from.
 ///
-/// The text is ~4.5MB of JSON, so the parse runs off the UI isolate and the
-/// result is cached for the process lifetime — the reader shows a spinner on
-/// first open only.
+/// Adding a translation is an asset file plus an entry in
+/// [BibleService.translations] — nothing else in the app needs to know.
+///
+/// Only public-domain texts can ship in the bundle. NIV, ESV, NLT, NASB and
+/// CSB are all under copyright and cannot be included without a licence
+/// agreement with their publishers, so they are deliberately absent rather
+/// than quietly missing.
+class BibleTranslation {
+  /// Stable id, also the storage value. Never change one in place.
+  final String id;
+
+  /// What the reader shows, e.g. "KJV".
+  final String abbrev;
+
+  /// Full name, e.g. "King James Version".
+  final String name;
+
+  /// Short line on where it comes from, shown in the picker.
+  final String note;
+
+  final String assetPath;
+
+  const BibleTranslation({
+    required this.id,
+    required this.abbrev,
+    required this.name,
+    required this.note,
+    required this.assetPath,
+  });
+}
+
+/// The in-app Bible. Loads the selected translation lazily and answers lookups
+/// against it.
+///
+/// Each translation is ~4.5MB of JSON, so the parse runs off the UI isolate.
+/// Exactly ONE translation is held in memory at a time: switching drops the
+/// previous text rather than accumulating four of them, which is the
+/// difference between ~5MB and ~20MB of resident heap on a phone. The cost is
+/// a reload when switching, which is why [select] is awaited.
 class BibleService {
   BibleService._();
   static final BibleService instance = BibleService._();
 
-  /// The translation shipped in the bundle. Swapping or adding one is an
-  /// asset change plus this constant — nothing else knows the translation.
-  static const String translation = 'KJV';
-  static const String _assetPath = 'assets/bible/kjv.json';
+  /// Every translation shipped in the bundle, in the order the picker lists
+  /// them. The first entry is the default for a device that has never chosen.
+  static const List<BibleTranslation> translations = [
+    BibleTranslation(
+      id: 'kjv',
+      abbrev: 'KJV',
+      name: 'King James Version',
+      note: 'Public domain · 1769 edition',
+      assetPath: 'assets/bible/kjv.json',
+    ),
+  ];
+
+  static BibleTranslation get _default => translations.first;
+
+  /// Look a translation up by id, falling back to the default rather than
+  /// throwing — a stored id can outlive the translation it named.
+  static BibleTranslation byId(String? id) {
+    for (final t in translations) {
+      if (t.id == id) return t;
+    }
+    return _default;
+  }
+
+  BibleTranslation? _current;
+
+  /// The translation currently being read. Resolved from storage on first use.
+  BibleTranslation get currentTranslation =>
+      _current ??= byId(StorageService.instance.loadBibleTranslation());
+
+  /// Abbreviation of the current translation, for labelling. Kept as a static
+  /// getter so the call sites that read `BibleService.translation` when there
+  /// was only one translation still read correctly.
+  static String get translation => instance.currentTranslation.abbrev;
+
+  /// Whether more than one translation is available to switch between.
+  static bool get hasChoice => translations.length > 1;
 
   List<BibleBook>? _books;
   Future<List<BibleBook>>? _loading;
 
-  bool get isLoaded => _books != null;
+  /// Which translation [_books] actually holds, so a stale cache is never
+  /// served as the newly-selected one.
+  String? _loadedId;
+
+  bool get isLoaded => _books != null && _loadedId == currentTranslation.id;
 
   /// Books in canon order. Await [load] first, or use [books] after [isLoaded].
-  List<BibleBook> get books => _books ?? const [];
+  List<BibleBook> get books => isLoaded ? _books! : const [];
 
   Future<List<BibleBook>> load() {
     final cached = _books;
-    if (cached != null) return Future.value(cached);
+    if (cached != null && _loadedId == currentTranslation.id) {
+      return Future.value(cached);
+    }
     // Share one in-flight load between concurrent callers rather than
     // parsing 4.5MB twice.
     return _loading ??= _doLoad();
   }
 
+  /// Switch translations and load the new text.
+  ///
+  /// Awaiting this matters: the previous text is dropped first, so between the
+  /// two the service has no books at all and callers must not read [books]
+  /// until it returns.
+  Future<void> select(BibleTranslation next) async {
+    if (next.id == currentTranslation.id && isLoaded) return;
+    _current = next;
+    _books = null;
+    _loadedId = null;
+    _loading = null;
+    await StorageService.instance.saveBibleTranslation(next.id);
+    await load();
+  }
+
   Future<List<BibleBook>> _doLoad() async {
+    final wanted = currentTranslation;
     try {
-      final raw = await rootBundle.loadString(_assetPath);
+      final raw = await rootBundle.loadString(wanted.assetPath);
       final parsed = await compute(_parse, raw);
-      _books = parsed;
+      // A switch can land mid-parse; only publish if this is still the one
+      // being asked for.
+      if (wanted.id == currentTranslation.id) {
+        _books = parsed;
+        _loadedId = wanted.id;
+      }
       return parsed;
     } finally {
       _loading = null;
