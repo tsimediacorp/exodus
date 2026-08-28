@@ -8,6 +8,7 @@ import '../models/check_in.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
 import '../services/check_in_service.dart';
+import '../services/conversation_search.dart';
 import '../services/memory_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
@@ -17,7 +18,6 @@ import '../widgets/exodus_shield.dart';
 import '../widgets/check_in_card.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/progress_view.dart';
-import 'settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   /// Opens the app-wide left drawer (owned by HomeShell).
@@ -63,6 +63,26 @@ class ChatScreenState extends State<ChatScreen> {
   /// Cap attachments per message to keep request payloads sane.
   static const int _maxAttachments = 4;
 
+  // ---------------- In-conversation search ----------------
+
+  final TextEditingController _search = TextEditingController();
+  bool _searching = false;
+
+  /// Every occurrence of the search term in the open conversation, in thread
+  /// order: which message, and which occurrence within that message. Flat
+  /// rather than grouped so "4 of 17" counts what the user counts.
+  List<({int message, int occurrence})> _matches = const [];
+  int _activeMatch = 0;
+
+  /// Keys on the messages that contain a match, so the active one can be
+  /// scrolled to. Only matching messages get one — a key per message would
+  /// cost the whole thread for a feature most sessions never open.
+  final Map<int, GlobalKey> _matchKeys = {};
+
+  /// Whether the composer has anything to send. Tracked so the send button can
+  /// go flat when there's nothing to do without rebuilding on every keystroke.
+  bool _hasDraft = false;
+
   final List<String> _starters = const [
     'How do we lead our marriage spiritually as newlyweds?',
     'What does scripture say about money in marriage?',
@@ -78,7 +98,9 @@ class ChatScreenState extends State<ChatScreen> {
     _scroll.addListener(_onScroll);
     // Restore anything typed but never sent before the app was killed.
     _input.text = _storage.loadComposerDraft();
+    _hasDraft = _input.text.trim().isNotEmpty;
     _input.addListener(_saveDraft);
+    _input.addListener(_onInputChanged);
     _conversations = _storage.loadConversations();
     final id = _storage.getCurrentConversationId();
     if (id != null) {
@@ -101,6 +123,90 @@ class ChatScreenState extends State<ChatScreen> {
     if (mounted) setState(() {});
   }
 
+  /// Only rebuilds when the composer crosses empty/non-empty, not on every
+  /// keystroke — the send button is the only thing that cares.
+  void _onInputChanged() {
+    final has = _input.text.trim().isNotEmpty;
+    if (has != _hasDraft) setState(() => _hasDraft = has);
+  }
+
+  // ---------------- In-conversation search ----------------
+
+  void _openSearch() => setState(() => _searching = true);
+
+  void _closeSearch() {
+    _search.clear();
+    setState(() {
+      _searching = false;
+      _matches = const [];
+      _activeMatch = 0;
+      _matchKeys.clear();
+    });
+  }
+
+  void _onSearchChanged(String raw) {
+    final found = ConversationSearch.matches(
+        [for (final m in _messages) m.content], raw);
+    _matchKeys.clear();
+    for (final match in found) {
+      _matchKeys.putIfAbsent(match.message, () => GlobalKey());
+    }
+    setState(() {
+      _matches = found;
+      _activeMatch = 0;
+    });
+    if (found.isNotEmpty) unawaited(_revealMatch());
+  }
+
+  void _stepMatch(int delta) {
+    if (_matches.isEmpty) return;
+    HapticFeedback.selectionClick();
+    // Dart's % is non-negative for a positive divisor, so stepping back from
+    // the first match wraps to the last one.
+    setState(() => _activeMatch = (_activeMatch + delta) % _matches.length);
+    unawaited(_revealMatch());
+  }
+
+  /// Bring the active match on screen.
+  ///
+  /// The thread is a lazy list, so the target message often isn't built yet
+  /// and has no context to scroll to. Jump to a proportional estimate, let a
+  /// frame settle so the builder catches up, then correct with
+  /// [Scrollable.ensureVisible]. Repeated a few times because one estimate can
+  /// land short when message lengths are very uneven; it gives up quietly
+  /// rather than looping if the target never materialises.
+  Future<void> _revealMatch() async {
+    if (_matches.isEmpty) return;
+    final target = _matches[_activeMatch].message;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (!mounted) return;
+      final ctx = _matchKeys[target]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.25,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+        return;
+      }
+      if (!_scroll.hasClients) return;
+      final count = _messages.length;
+      final fraction = count < 2 ? 0.0 : target / (count - 1);
+      _scroll.jumpTo(fraction * _scroll.position.maxScrollExtent);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
+  }
+
+  /// Which occurrence inside [messageIndex] is the selected one, or null when
+  /// the selected match lives in a different message.
+  int? _activeOccurrenceIn(int messageIndex) {
+    if (_matches.isEmpty) return null;
+    final active = _matches[_activeMatch];
+    return active.message == messageIndex ? active.occurrence : null;
+  }
+
   /// Show the jump-to-latest arrow once the user has scrolled up from the end.
   void _onScroll() {
     if (!_scroll.hasClients) return;
@@ -116,7 +222,9 @@ class ChatScreenState extends State<ChatScreen> {
     CheckInService.instance.removeListener(_onCheckInsChanged);
     TtsService.instance.stop();
     _input.removeListener(_saveDraft);
+    _input.removeListener(_onInputChanged);
     _input.dispose();
+    _search.dispose();
     _scroll.dispose();
     _status.dispose();
     _ai.dispose();
@@ -503,13 +611,6 @@ class ChatScreenState extends State<ChatScreen> {
     _persist();
   }
 
-  Future<void> _openSettings() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
-    setState(() {});
-  }
-
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -525,41 +626,186 @@ class ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('EXODUS'),
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
-          tooltip: 'Menu',
-          onPressed: widget.onOpenMenu,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_comment_outlined,
-                color: ExodusTheme.ironMist),
-            tooltip: 'New conversation',
-            onPressed: newConversation,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined,
-                color: ExodusTheme.ironMist),
-            tooltip: 'Settings',
-            onPressed: _openSettings,
-          ),
-        ],
-      ),
+      appBar: _searching ? _searchBar() : _appBar(),
       body: SafeArea(
         child: Column(
           children: [
             // Something EXODUS remembered and means to come back to. Sits
             // above the thread rather than interrupting it, and only when
-            // nothing is being sent.
-            if (!_sending) _checkInBanner(),
+            // nothing is being sent. Hidden while searching: it would shift
+            // every match by its own height mid-scroll.
+            if (!_sending && !_searching) _checkInBanner(),
             Expanded(
-              child: _messages.isEmpty ? _buildWelcome() : _buildMessages(),
+              child: _messages.isEmpty && !_searching
+                  ? _buildWelcome()
+                  : _buildMessages(),
             ),
-            _buildInputBar(),
+            if (_searching) _searchFooter() else _buildInputBar(),
           ],
         ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _appBar() {
+    final title = _current?.title.trim() ?? '';
+    return AppBar(
+      titleSpacing: 0,
+      leading: IconButton(
+        icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
+        tooltip: 'Menu',
+        onPressed: widget.onOpenMenu,
+      ),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('EXODUS',
+              style: TextStyle(
+                color: ExodusTheme.porcelain,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 3,
+              )),
+          // Which conversation is open was visible only inside the drawer.
+          if (title.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 190),
+              child: Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: ExodusTheme.ironMist, fontSize: 11)),
+            ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.search_rounded, color: ExodusTheme.ironMist),
+          tooltip: 'Search this conversation',
+          onPressed: _messages.isEmpty ? null : _openSearch,
+        ),
+        IconButton(
+          icon: const Icon(Icons.add_comment_outlined,
+              color: ExodusTheme.ironMist),
+          tooltip: 'New conversation',
+          onPressed: newConversation,
+        ),
+        // Settings moved out of here — it is pinned at the bottom of the
+        // drawer, reachable from every mode, and this bar needed the room.
+      ],
+    );
+  }
+
+  /// The app bar in search mode. Replaces the bar rather than sliding in under
+  /// it, so the thread doesn't jump by a bar's height when search opens.
+  PreferredSizeWidget _searchBar() {
+    final total = _matches.length;
+    final hasQuery = _search.text.trim().isNotEmpty;
+    return AppBar(
+      titleSpacing: 0,
+      leading: IconButton(
+        icon: const Icon(Icons.close_rounded, color: ExodusTheme.ironMist),
+        tooltip: 'Close search',
+        onPressed: _closeSearch,
+      ),
+      title: Container(
+        height: 38,
+        padding: const EdgeInsets.only(left: 13, right: 4),
+        decoration: BoxDecoration(
+          color: ExodusTheme.slate,
+          border: Border.all(color: ExodusTheme.covenantBlue),
+          borderRadius: BorderRadius.circular(19),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search_rounded,
+                size: 15, color: ExodusTheme.covenantGlow),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _search,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                onChanged: _onSearchChanged,
+                onSubmitted: (_) => _stepMatch(1),
+                cursorColor: ExodusTheme.covenantGlow,
+                style: const TextStyle(
+                    color: ExodusTheme.porcelain, fontSize: 15),
+                // The app-wide input theme fills and outlines every field.
+                // Inside the pill that would draw a box within a box.
+                decoration: const InputDecoration(
+                  isDense: true,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  hintText: 'Search this conversation',
+                  hintStyle:
+                      TextStyle(color: ExodusTheme.ironMist, fontSize: 14),
+                ),
+              ),
+            ),
+            if (hasQuery)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  total == 0 ? 'none' : '${_activeMatch + 1}/$total',
+                  style: const TextStyle(
+                    color: ExodusTheme.ironMist,
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.keyboard_arrow_up_rounded),
+          color: ExodusTheme.ironMist,
+          disabledColor: ExodusTheme.steel,
+          tooltip: 'Previous match',
+          onPressed: _matches.isEmpty ? null : () => _stepMatch(-1),
+        ),
+        IconButton(
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+          color: ExodusTheme.porcelain,
+          disabledColor: ExodusTheme.steel,
+          tooltip: 'Next match',
+          onPressed: _matches.isEmpty ? null : () => _stepMatch(1),
+        ),
+      ],
+    );
+  }
+
+  /// Stands in for the composer while searching — there is nothing to type
+  /// into, and the keyboard belongs to the search field.
+  Widget _searchFooter() {
+    final total = _matches.length;
+    final hasQuery = _search.text.trim().isNotEmpty;
+    final label = !hasQuery
+        ? 'Type to search this conversation'
+        : total == 0
+            ? 'No matches'
+            : '$total ${total == 1 ? 'match' : 'matches'} in this conversation';
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: ExodusTheme.steel)),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        children: [
+          const Icon(Icons.search_rounded,
+              size: 15, color: ExodusTheme.ironMist),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    color: ExodusTheme.ironMist, fontSize: 13)),
+          ),
+        ],
       ),
     );
   }
@@ -668,7 +914,9 @@ class ChatScreenState extends State<ChatScreen> {
     return Stack(
       children: [
         _buildMessageList(),
-        if (_showScrollDown)
+        // While searching, the up/down match controls own vertical movement —
+        // a second jump affordance would just fight them.
+        if (_showScrollDown && !_searching)
           Positioned(
             bottom: 12,
             left: 0,
@@ -703,11 +951,13 @@ class ChatScreenState extends State<ChatScreen> {
       itemCount: _messages.length,
       itemBuilder: (_, i) {
         final msg = _messages[i];
-        return MessageBubble(
+        final bubble = MessageBubble(
           // Keyed by identity so Flutter keeps each bubble's expanded/action
           // state attached to the right message as the list grows.
           key: ObjectKey(msg),
           message: msg,
+          searchQuery: _searching ? _search.text.trim() : '',
+          activeOccurrence: _searching ? _activeOccurrenceIn(i) : null,
           onRegenerate: msg.sender == Sender.exodus && !_sending
               ? () => _regenerate(msg)
               : null,
@@ -716,6 +966,10 @@ class ChatScreenState extends State<ChatScreen> {
               : null,
           onDelete: !_sending ? () => _deleteMessage(msg) : null,
         );
+        // The match key goes on a wrapper, not the bubble: the bubble already
+        // carries an ObjectKey, and a widget can only hold one.
+        final matchKey = _matchKeys[i];
+        return matchKey == null ? bubble : KeyedSubtree(key: matchKey, child: bubble);
       },
     );
   }
@@ -764,78 +1018,121 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _composer() {
+    final canSend = _hasDraft || _pendingImages.isNotEmpty;
     return Container(
-      decoration: const BoxDecoration(
-        color: ExodusTheme.obsidian,
-        border: Border(top: BorderSide(color: ExodusTheme.steel, width: 1)),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_pendingImages.isNotEmpty) _buildPendingImages(),
-          Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            color: ExodusTheme.ironMist,
-            tooltip: 'Attach image',
-            onPressed: _sending ? null : _attachImage,
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: TextField(
-              controller: _input,
-              maxLines: 5,
-              minLines: 1,
-              // Multi-line composing: Return inserts a newline, so there's no
-              // onSubmitted callback to hang a send off (it never fires).
-              textInputAction: TextInputAction.newline,
-              style: const TextStyle(color: ExodusTheme.porcelain),
-              decoration: const InputDecoration(
-                hintText: 'Ask EXODUS...',
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          // While streaming this becomes a Stop button — the subscription was
-          // already cancellable, it just had no way to reach it.
-          Semantics(
-            button: true,
-            label: _sending ? 'Stop generating' : 'Send message',
-            child: GestureDetector(
-              onTap: _sending ? _stopGenerating : _sendWithHaptic,
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: _sending
-                        ? const [ExodusTheme.steel, ExodusTheme.slate]
-                        : const [ExodusTheme.covenantBlue, ExodusTheme.covenantGlow],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+      color: ExodusTheme.obsidian,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      // One pill holding attach, field and send. Previously the bar was a
+      // full-width slab with a rule above it and a 48pt button hanging off the
+      // end; the send button now sits inside the same object it acts on.
+      child: Container(
+        decoration: BoxDecoration(
+          color: ExodusTheme.slate,
+          border: Border.all(color: ExodusTheme.steel),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        padding: EdgeInsets.fromLTRB(6, _pendingImages.isNotEmpty ? 10 : 5, 5, 5),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_pendingImages.isNotEmpty) _buildPendingImages(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.add_photo_alternate_outlined,
+                        size: 21),
+                    color: ExodusTheme.ironMist,
+                    disabledColor: ExodusTheme.steel,
+                    tooltip: 'Attach image',
+                    onPressed: _sending ? null : _attachImage,
                   ),
-                  shape: BoxShape.circle,
-                  boxShadow: _sending
-                      ? null
-                      : [
-                          BoxShadow(
-                            color: ExodusTheme.covenantBlue.withValues(alpha: 0.4),
-                            blurRadius: 12,
-                            spreadRadius: 1,
-                          ),
-                        ],
                 ),
-                child: Icon(_sending ? Icons.stop_rounded : Icons.arrow_upward,
-                    color: ExodusTheme.porcelain, size: 22),
-              ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: TextField(
+                      controller: _input,
+                      maxLines: 5,
+                      minLines: 1,
+                      // Multi-line composing: Return inserts a newline, so
+                      // there's no onSubmitted callback to hang a send off
+                      // (it never fires).
+                      textInputAction: TextInputAction.newline,
+                      cursorColor: ExodusTheme.covenantGlow,
+                      style: const TextStyle(
+                          color: ExodusTheme.porcelain, fontSize: 15),
+                      // The field is inside the pill now, so it must not draw
+                      // the app-wide fill and outline of its own.
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        filled: false,
+                        contentPadding: EdgeInsets.symmetric(vertical: 11),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: 'Ask EXODUS...',
+                      ),
+                    ),
+                  ),
+                ),
+                // While streaming this becomes a Stop button — the
+                // subscription was already cancellable, it just had no way to
+                // reach it.
+                Semantics(
+                  button: true,
+                  label: _sending ? 'Stop generating' : 'Send message',
+                  child: GestureDetector(
+                    onTap: _sending
+                        ? _stopGenerating
+                        : (canSend ? _sendWithHaptic : null),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        // Flat steel until there is something to send, so the
+                        // glowing button always means "this will do something".
+                        gradient: (!_sending && canSend)
+                            ? const LinearGradient(
+                                colors: [
+                                  ExodusTheme.covenantBlue,
+                                  ExodusTheme.covenantGlow
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : null,
+                        color: (!_sending && canSend) ? null : ExodusTheme.steel,
+                        shape: BoxShape.circle,
+                        boxShadow: (!_sending && canSend)
+                            ? [
+                                BoxShadow(
+                                  color: ExodusTheme.covenantBlue
+                                      .withValues(alpha: 0.4),
+                                  blurRadius: 12,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Icon(
+                        _sending ? Icons.stop_rounded : Icons.arrow_upward,
+                        color: (_sending || canSend)
+                            ? ExodusTheme.porcelain
+                            : ExodusTheme.ironMist,
+                        size: _sending ? 18 : 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

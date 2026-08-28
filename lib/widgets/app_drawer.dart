@@ -7,10 +7,18 @@ import '../screens/settings_screen.dart';
 import '../theme/exodus_theme.dart';
 import 'exodus_shield.dart';
 
-/// The app-wide left drawer. Top section switches between the three modes
-/// (Counsel / Coaching / Devotional); below it, the chats section lists the
-/// Counsel conversations.
-class AppDrawer extends StatelessWidget {
+/// The app-wide left drawer: modes at the top, then collapsible sections for
+/// conversations and the library, with Settings pinned at the bottom.
+///
+/// Everything between the header and Settings lives in ONE scroll view. The
+/// previous layout was a Column of fixed-height chrome (header + 4 mode tiles
+/// + 5 footer tiles + dividers) wrapping the chat list in an `Expanded`. On a
+/// short screen — or with large type, or once the mode list grew — the fixed
+/// chrome alone exceeded the drawer height, so the `Expanded` was handed a
+/// negative constraint and the sections rendered on top of each other. One
+/// scroll makes that structurally impossible: content taller than the drawer
+/// scrolls instead of colliding.
+class AppDrawer extends StatefulWidget {
   final int currentMode;
   final ValueChanged<int> onSelectMode;
 
@@ -40,9 +48,22 @@ class AppDrawer extends StatelessWidget {
     (icon: Icons.favorite_outline, active: Icons.favorite, label: 'Together'),
   ];
 
+  /// Which sections are open, kept across drawer opens.
+  ///
+  /// Static because the drawer is torn out of the tree when it closes, so its
+  /// State is disposed every time — instance fields would reset the sections
+  /// on each open. Session-scoped by design; not worth a prefs round-trip.
+  static bool _chatsOpen = true;
+  static bool _libraryOpen = false;
+
+  @override
+  State<AppDrawer> createState() => _AppDrawerState();
+}
+
+class _AppDrawerState extends State<AppDrawer> {
   @override
   Widget build(BuildContext context) {
-    final sorted = [...conversations]
+    final sorted = [...widget.conversations]
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     return Drawer(
@@ -52,55 +73,82 @@ class AppDrawer extends StatelessWidget {
         child: Column(
           children: [
             _header(),
-            // ---- Modes ----
-            for (var i = 0; i < _modes.length; i++) _modeTile(context, i),
-            const Divider(color: ExodusTheme.steel, height: 24),
-            // ---- Chats ----
-            _sectionLabel('CHATS'),
-            _newButton(context),
             Expanded(
-              child: sorted.isEmpty
-                  ? _emptyState()
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: sorted.length,
-                      itemBuilder: (_, i) => _tile(context, sorted[i]),
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 8),
+                children: [
+                  // ---- Modes ----
+                  for (var i = 0; i < AppDrawer._modes.length; i++)
+                    _modeTile(context, i),
+                  const Divider(color: ExodusTheme.steel, height: 24),
+
+                  // ---- Chats ----
+                  _sectionHeader(
+                    label: 'CHATS',
+                    // The count is what makes a collapsed section honest —
+                    // otherwise closing it reads as "my conversations are gone".
+                    trailing: sorted.isEmpty ? null : '${sorted.length}',
+                    expanded: AppDrawer._chatsOpen,
+                    onTap: () => setState(
+                        () => AppDrawer._chatsOpen = !AppDrawer._chatsOpen),
+                  ),
+                  if (AppDrawer._chatsOpen) ...[
+                    _newButton(context),
+                    if (sorted.isEmpty)
+                      _emptyState()
+                    else
+                      for (final conv in sorted) _tile(context, conv),
+                  ],
+
+                  const Divider(color: ExodusTheme.steel, height: 24),
+
+                  // ---- Library ----
+                  _sectionHeader(
+                    label: 'LIBRARY',
+                    expanded: AppDrawer._libraryOpen,
+                    onTap: () => setState(
+                        () => AppDrawer._libraryOpen = !AppDrawer._libraryOpen),
+                  ),
+                  if (AppDrawer._libraryOpen) ...[
+                    _linkTile(
+                      context,
+                      icon: Icons.menu_book_rounded,
+                      label: 'Bible',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const BibleScreen()),
+                      ),
                     ),
+                    _linkTile(
+                      context,
+                      icon: Icons.mail_outline_rounded,
+                      label: 'Weekly letter',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const LettersScreen()),
+                      ),
+                    ),
+                    _linkTile(
+                      context,
+                      icon: Icons.route_rounded,
+                      label: 'Journeys',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const JourneysScreen()),
+                      ),
+                    ),
+                    _linkTile(
+                      context,
+                      icon: Icons.psychology_outlined,
+                      label: 'Memory',
+                      onTap: widget.onOpenMemory,
+                    ),
+                  ],
+                ],
+              ),
             ),
             const Divider(color: ExodusTheme.steel, height: 1),
-            _footerTile(
-              context,
-              icon: Icons.menu_book_rounded,
-              label: 'Bible',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const BibleScreen()),
-              ),
-            ),
-            _footerTile(
-              context,
-              icon: Icons.mail_outline_rounded,
-              label: 'Weekly letter',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const LettersScreen()),
-              ),
-            ),
-            _footerTile(
-              context,
-              icon: Icons.route_rounded,
-              label: 'Journeys',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const JourneysScreen()),
-              ),
-            ),
-            _footerTile(
-              context,
-              icon: Icons.psychology_outlined,
-              label: 'Memory',
-              onTap: onOpenMemory,
-            ),
-            // Settings used to live only in the Counsel app bar, so from
-            // Coaching/Devotional/Together you had to switch tabs to reach it.
-            _footerTile(
+            // Settings stays pinned: it is the one destination you need when
+            // something is broken, and hunting for it inside a collapsed
+            // section is exactly the wrong moment to make someone scroll.
+            _linkTile(
               context,
               icon: Icons.settings_outlined,
               label: 'Settings',
@@ -114,7 +162,7 @@ class AppDrawer extends StatelessWidget {
     );
   }
 
-  Widget _footerTile(BuildContext context,
+  Widget _linkTile(BuildContext context,
       {required IconData icon, required String label, required VoidCallback onTap}) {
     return InkWell(
       onTap: () {
@@ -158,12 +206,12 @@ class AppDrawer extends StatelessWidget {
   }
 
   Widget _modeTile(BuildContext context, int i) {
-    final m = _modes[i];
-    final selected = i == currentMode;
+    final m = AppDrawer._modes[i];
+    final selected = i == widget.currentMode;
     return InkWell(
       onTap: () {
         Navigator.of(context).pop();
-        onSelectMode(i);
+        widget.onSelectMode(i);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
@@ -194,18 +242,44 @@ class AppDrawer extends StatelessWidget {
     );
   }
 
-  Widget _sectionLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(text,
-            style: const TextStyle(
-              color: ExodusTheme.ironMist,
-              fontSize: 11,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w700,
-            )),
+  /// A tappable section label with a disclosure chevron.
+  Widget _sectionHeader({
+    required String label,
+    required bool expanded,
+    required VoidCallback onTap,
+    String? trailing,
+  }) {
+    return Semantics(
+      button: true,
+      expanded: expanded,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+          child: Row(
+            children: [
+              AnimatedRotation(
+                turns: expanded ? 0 : -0.25,
+                duration: const Duration(milliseconds: 150),
+                child: const Icon(Icons.keyboard_arrow_down_rounded,
+                    size: 18, color: ExodusTheme.ironMist),
+              ),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: const TextStyle(
+                    color: ExodusTheme.ironMist,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.w700,
+                  )),
+              const Spacer(),
+              if (trailing != null)
+                Text(trailing,
+                    style: const TextStyle(
+                        color: ExodusTheme.ironMist, fontSize: 11)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -217,7 +291,7 @@ class AppDrawer extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: () {
           Navigator.of(context).pop();
-          onNewConversation();
+          widget.onNewConversation();
         },
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -244,18 +318,17 @@ class AppDrawer extends StatelessWidget {
   }
 
   Widget _emptyState() {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 32),
-        child: Text('No conversations yet.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: ExodusTheme.ironMist, fontSize: 13)),
-      ),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(32, 8, 32, 16),
+      child: Text('No conversations yet.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: ExodusTheme.ironMist, fontSize: 13)),
     );
   }
 
   Widget _tile(BuildContext context, Conversation conv) {
-    final isActive = conv.id == currentConversationId && currentMode == 0;
+    final isActive =
+        conv.id == widget.currentConversationId && widget.currentMode == 0;
     return Dismissible(
       key: ValueKey(conv.id),
       direction: DismissDirection.endToStart,
@@ -286,11 +359,11 @@ class AppDrawer extends StatelessWidget {
             ) ??
             false;
       },
-      onDismissed: (_) => onDeleteConversation(conv.id),
+      onDismissed: (_) => widget.onDeleteConversation(conv.id),
       child: InkWell(
         onTap: () {
           Navigator.of(context).pop();
-          onSelectConversation(conv.id);
+          widget.onSelectConversation(conv.id);
         },
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
