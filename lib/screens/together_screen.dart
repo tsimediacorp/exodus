@@ -1,3 +1,4 @@
+import 'package:amplify_flutter/amplify_flutter.dart' show AuthException;
 import 'package:flutter/material.dart';
 import '../config/quiz_bank.dart';
 import '../services/amplify_service.dart';
@@ -138,6 +139,28 @@ class _TogetherScreenState extends State<TogetherScreen> {
 
 // ======================= Auth =======================
 
+/// The password rules Cognito actually enforces on this pool, mirrored from
+/// `amplify_outputs.dart` (`password_policy`).
+///
+/// They are duplicated here deliberately. The server is the authority, but a
+/// user should never have to discover a rule by failing — before this, the
+/// only way to learn a symbol was required was to submit and be handed a raw
+/// InvalidPasswordException.
+class _PasswordRule {
+  final String label;
+  final bool Function(String) met;
+  const _PasswordRule(this.label, this.met);
+}
+
+final List<_PasswordRule> _passwordRules = [
+  _PasswordRule('At least 8 characters', (p) => p.length >= 8),
+  _PasswordRule('An uppercase letter', (p) => RegExp(r'[A-Z]').hasMatch(p)),
+  _PasswordRule('A lowercase letter', (p) => RegExp(r'[a-z]').hasMatch(p)),
+  _PasswordRule('A number', (p) => RegExp(r'[0-9]').hasMatch(p)),
+  _PasswordRule(
+      'A symbol (like ! ? \$ #)', (p) => RegExp(r'[^A-Za-z0-9]').hasMatch(p)),
+];
+
 class _AuthView extends StatefulWidget {
   final TogetherService svc;
   final VoidCallback onAuthed;
@@ -154,7 +177,31 @@ class _AuthViewState extends State<_AuthView> {
   bool _isSignUp = false;
   bool _awaitingCode = false;
   bool _busy = false;
+  bool _showPassword = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // The requirements checklist ticks as you type, so it has to rebuild.
+    _password.addListener(_onPasswordChanged);
+  }
+
+  @override
+  void dispose() {
+    _password.removeListener(_onPasswordChanged);
+    _email.dispose();
+    _password.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  void _onPasswordChanged() {
+    if (_isSignUp) setState(() {});
+  }
+
+  List<_PasswordRule> get _unmet =>
+      [for (final r in _passwordRules) if (!r.met(_password.text)) r];
 
   Future<void> _run(Future<void> Function() action) async {
     setState(() {
@@ -164,10 +211,73 @@ class _AuthViewState extends State<_AuthView> {
     try {
       await action();
     } on Exception catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = _friendly(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Turn an Amplify/Cognito failure into something a person can act on.
+  ///
+  /// `AuthException.toString()` renders a JSON blob with the message nested
+  /// inside an `underlyingException` string — which is what used to land on
+  /// screen, in red, under the sign-up button.
+  String _friendly(Exception e) {
+    final type = e.runtimeType.toString();
+    final raw = e is AuthException ? e.message : e.toString();
+
+    if (type.contains('InvalidPassword')) {
+      return 'That password does not meet the requirements below.';
+    }
+    if (type.contains('UsernameExists')) {
+      return 'An account already exists for that email. Try signing in.';
+    }
+    if (type.contains('UserNotFound')) {
+      return 'No account found for that email.';
+    }
+    if (type.contains('NotAuthorized')) {
+      return 'That email and password do not match.';
+    }
+    if (type.contains('UserNotConfirmed')) {
+      return 'This account still needs confirming. Check your email for the '
+          'code.';
+    }
+    if (type.contains('CodeMismatch')) {
+      return 'That confirmation code is not right. Check the email and try '
+          'again.';
+    }
+    if (type.contains('ExpiredCode')) {
+      return 'That confirmation code has expired. Request a new one.';
+    }
+    if (type.contains('LimitExceeded') || type.contains('TooManyRequests')) {
+      return 'Too many attempts. Wait a minute and try again.';
+    }
+    if (type.contains('Network') ||
+        raw.contains('SocketException') ||
+        raw.contains('Failed host lookup')) {
+      return 'No internet connection.';
+    }
+    if (type.contains('InvalidParameter')) {
+      // Almost always a malformed email at this point in the flow.
+      return 'Check the email address and password and try again.';
+    }
+    // Anything unmapped: show Cognito's own sentence, never its JSON.
+    return raw.isEmpty ? 'Something went wrong. Try again.' : raw;
+  }
+
+  /// Catch what we can before the network does, so the common mistake costs
+  /// nothing and names itself.
+  String? _validate() {
+    final email = _email.text.trim();
+    if (email.isEmpty) return 'Enter your email address.';
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      return 'That email address does not look right.';
+    }
+    if (_password.text.isEmpty) return 'Enter a password.';
+    if (_isSignUp && _unmet.isNotEmpty) {
+      return 'Your password is missing: ${_unmet.map((r) => r.label.toLowerCase()).join(', ')}.';
+    }
+    return null;
   }
 
   @override
@@ -197,22 +307,37 @@ class _AuthViewState extends State<_AuthView> {
                   widget.onAuthed();
                 })),
           ] else ...[
-            _field(_email, 'Email'),
+            _field(_email, 'Email', keyboard: TextInputType.emailAddress),
             const SizedBox(height: 12),
-            _field(_password, 'Password', obscure: true),
+            _field(_password, 'Password', obscure: !_showPassword, toggle: true),
+            // Shown while composing a password, not after the fact as an
+            // error. Nothing here is a surprise by the time you press submit.
+            if (_isSignUp) _requirements(),
             const SizedBox(height: 16),
-            _primary(_isSignUp ? 'Create account' : 'Sign in', () => _run(() async {
-                  if (_isSignUp) {
-                    await widget.svc.signUp(_email.text.trim(), _password.text);
-                    setState(() => _awaitingCode = true);
-                  } else {
-                    await widget.svc.signIn(_email.text.trim(), _password.text);
-                    widget.onAuthed();
-                  }
-                })),
+            _primary(_isSignUp ? 'Create account' : 'Sign in', () {
+              final problem = _validate();
+              if (problem != null) {
+                setState(() => _error = problem);
+                return;
+              }
+              _run(() async {
+                if (_isSignUp) {
+                  await widget.svc.signUp(_email.text.trim(), _password.text);
+                  setState(() => _awaitingCode = true);
+                } else {
+                  await widget.svc.signIn(_email.text.trim(), _password.text);
+                  widget.onAuthed();
+                }
+              });
+            }),
             const SizedBox(height: 8),
             TextButton(
-              onPressed: _busy ? null : () => setState(() => _isSignUp = !_isSignUp),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                        _isSignUp = !_isSignUp;
+                        _error = null;
+                      }),
               child: Text(
                   _isSignUp ? 'Have an account? Sign in' : "New here? Create an account",
                   style: const TextStyle(color: ExodusTheme.covenantGlow)),
@@ -230,13 +355,78 @@ class _AuthViewState extends State<_AuthView> {
     );
   }
 
-  Widget _field(TextEditingController c, String hint, {bool obscure = false}) => TextField(
+  /// The live checklist. Each rule ticks as it is satisfied.
+  Widget _requirements() {
+    final empty = _password.text.isEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Your password needs:',
+              style: TextStyle(color: ExodusTheme.ironMist, fontSize: 12)),
+          const SizedBox(height: 8),
+          for (final rule in _passwordRules)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    rule.met(_password.text)
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    size: 14,
+                    color: rule.met(_password.text)
+                        ? ExodusTheme.brass
+                        : ExodusTheme.steel,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(rule.label,
+                      style: TextStyle(
+                        color: rule.met(_password.text)
+                            ? ExodusTheme.porcelain
+                            : ExodusTheme.ironMist,
+                        fontSize: 12,
+                      )),
+                ],
+              ),
+            ),
+          if (empty) const SizedBox(height: 2),
+        ],
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController c, String hint,
+          {bool obscure = false,
+          bool toggle = false,
+          TextInputType? keyboard}) =>
+      TextField(
         controller: c,
         obscureText: obscure,
         autocorrect: false,
         enableSuggestions: false,
+        keyboardType: keyboard,
+        textInputAction: TextInputAction.next,
         style: const TextStyle(color: ExodusTheme.porcelain),
-        decoration: InputDecoration(hintText: hint),
+        decoration: InputDecoration(
+          hintText: hint,
+          // Composing a password with five rules to satisfy is miserable
+          // blind.
+          suffixIcon: toggle
+              ? IconButton(
+                  icon: Icon(
+                      _showPassword
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 20,
+                      color: ExodusTheme.ironMist),
+                  tooltip: _showPassword ? 'Hide password' : 'Show password',
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                )
+              : null,
+        ),
       );
 
   Widget _primary(String label, VoidCallback onTap) => FilledButton(
