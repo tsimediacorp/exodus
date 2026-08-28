@@ -243,6 +243,24 @@ class _BibleScreenState extends State<BibleScreen> {
   List<String> get _verses =>
       _bible.books.isEmpty ? const [] : _bible.books[_bookIndex].verses(_chapter);
 
+  /// What each verse actually shows.
+  ///
+  /// Translations following the critical text carry sixteen verses as empty
+  /// strings. Substituting here rather than at the point of rendering keeps
+  /// the paginator measuring the same text the reader sees — otherwise page
+  /// mode would measure an empty line and lay out a page that overflows.
+  List<String> get _displayVerses =>
+      [for (final v in _verses) v.trim().isEmpty ? _omittedLabel : v];
+
+  String get _omittedLabel =>
+      'Not included in the ${BibleService.translation}.';
+
+  /// Whether verse [number] (1-based) is one the translation omits.
+  bool _isOmitted(int number) =>
+      number >= 1 &&
+      number <= _verses.length &&
+      _verses[number - 1].trim().isEmpty;
+
   int get _chapterCount =>
       _bible.books.isEmpty ? 0 : _bible.books[_bookIndex].chapterCount;
 
@@ -262,7 +280,7 @@ class _BibleScreenState extends State<BibleScreen> {
 
   String get _selectionText {
     final sorted = _selected.toList()..sort();
-    final verses = _verses;
+    final verses = _displayVerses;
     return sorted
         .where((v) => v >= 1 && v <= verses.length)
         .map((v) => verses[v - 1])
@@ -623,7 +641,7 @@ class _BibleScreenState extends State<BibleScreen> {
       );
     }
 
-    final verses = _verses;
+    final verses = _displayVerses;
     _verseKeys.clear();
 
     if (!_paged) {
@@ -848,13 +866,24 @@ class _BibleScreenState extends State<BibleScreen> {
                     height: 1.7,
                   ),
                 ),
+                // An omitted verse keeps its number so every other verse
+                // still lands where the reader expects, but a bare number with
+                // nothing after it reads as a rendering bug — so it is set
+                // apart the way a print Bible footnotes it.
                 TextSpan(
                   text: text,
-                  style: const TextStyle(
-                    color: ExodusTheme.porcelain,
-                    fontSize: 16,
-                    height: 1.7,
-                  ),
+                  style: _isOmitted(number)
+                      ? const TextStyle(
+                          color: ExodusTheme.ironMist,
+                          fontSize: 14,
+                          height: 1.7,
+                          fontStyle: FontStyle.italic,
+                        )
+                      : const TextStyle(
+                          color: ExodusTheme.porcelain,
+                          fontSize: 16,
+                          height: 1.7,
+                        ),
                 ),
               ],
             ),

@@ -76,6 +76,27 @@ class BibleService {
       note: 'Public domain · 1769 edition',
       assetPath: 'assets/bible/kjv.json',
     ),
+    BibleTranslation(
+      id: 'bsb',
+      abbrev: 'BSB',
+      name: 'Berean Standard Bible',
+      note: 'Public domain · modern English',
+      assetPath: 'assets/bible/bsb.json',
+    ),
+    BibleTranslation(
+      id: 'asv',
+      abbrev: 'ASV',
+      name: 'American Standard Version',
+      note: 'Public domain · 1901',
+      assetPath: 'assets/bible/asv.json',
+    ),
+    BibleTranslation(
+      id: 'ylt',
+      abbrev: 'YLT',
+      name: "Young's Literal Translation",
+      note: 'Public domain · 1898 · word-for-word',
+      assetPath: 'assets/bible/ylt.json',
+    ),
   ];
 
   static BibleTranslation get _default => translations.first;
