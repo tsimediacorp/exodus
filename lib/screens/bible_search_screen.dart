@@ -155,7 +155,8 @@ class _BibleSearchScreenState extends State<BibleSearchScreen> {
   }
 
   List<_Hit> _searchText(String query) {
-    _progress.stage('Scanning all 31,100 verses…', step: 2, totalSteps: 2);
+    _progress.stage('Scanning every verse of the ${BibleService.translation}…',
+        step: 2, totalSteps: 2);
     return _bible
         .searchText(query, limit: 80)
         .map((ref) => _Hit(

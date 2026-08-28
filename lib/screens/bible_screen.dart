@@ -69,9 +69,9 @@ class _BibleScreenState extends State<BibleScreen> {
   List<BiblePage> _pages = const [];
   int _pageIndex = 0;
 
-  /// Inputs the current pagination was computed for. Re-measuring 31,100
-  /// verses on every rebuild would be wasteful, so it only recomputes when
-  /// the chapter, viewport or text scale actually changes.
+  /// Inputs the current pagination was computed for. Re-measuring every verse
+  /// on every rebuild would be wasteful, so it only recomputes when the
+  /// translation, chapter, viewport or text scale actually changes.
   String? _paginatedFor;
 
   /// A verse to land on once pages exist — set by a deep link, consumed on
