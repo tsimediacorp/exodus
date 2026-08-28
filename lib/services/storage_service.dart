@@ -4,12 +4,14 @@ import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/check_in.dart';
 import '../models/coaching_session.dart';
+import '../models/confession.dart';
 import '../models/conversation.dart';
 import '../models/devotional.dart';
 import '../models/journey.dart';
 import '../models/marriage_letter.dart';
 import '../models/memory_item.dart';
 import '../models/saved_verse.dart';
+import '../models/study_exercise.dart';
 
 /// Persists conversations and MasterPrompt runtime overrides to
 /// shared_preferences (which on iOS is NSUserDefaults — local to the app,
@@ -48,6 +50,10 @@ class StorageService {
   static const _kCheckIns          = 'exodus.checkIns';
   static const _kCheckInScan       = 'exodus.checkIns.lastScan';
   static const _kCheckInsEnabled   = 'exodus.checkIns.enabled';
+  static const _kStudyExercises    = 'exodus.study.exercises';
+  // Confessions are stored under their own key and never merged into
+  // conversations or memory — see ConfessionService for why that matters.
+  static const _kConfessions       = 'exodus.confessions';
 
   Future<void> init() async {
     try {
@@ -399,6 +405,80 @@ class StorageService {
     all.sort((a, b) => b.day.compareTo(a.day));
     await _prefs?.setString(
         _kDevotionals, jsonEncode(all.map((d) => d.toJson()).toList()));
+  }
+
+  // ---------------- Bible study exercises ----------------
+
+  /// All saved exercises, newest day first.
+  List<StudyExercise> loadStudyExercises() {
+    final raw = _prefs?.getString(_kStudyExercises);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => StudyExercise.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.day.compareTo(a.day));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  StudyExercise? studyExerciseForDay(DateTime day) {
+    final key = StudyExercise.keyFor(day);
+    for (final e in loadStudyExercises()) {
+      if (e.dayKey == key) return e;
+    }
+    return null;
+  }
+
+  /// Insert or replace the exercise for its day.
+  Future<void> saveStudyExercise(StudyExercise exercise) async {
+    final all = loadStudyExercises()
+      ..removeWhere((e) => e.dayKey == exercise.dayKey)
+      ..add(exercise);
+    all.sort((a, b) => b.day.compareTo(a.day));
+    await _prefs?.setString(
+        _kStudyExercises, jsonEncode(all.map((e) => e.toJson()).toList()));
+  }
+
+  // ---------------- Confessions ----------------
+
+  /// Everything confessed on this device, newest first. Deliberately separate
+  /// from conversations and from memory.
+  List<Confession> loadConfessions() {
+    final raw = _prefs?.getString(_kConfessions);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => Confession.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveConfession(Confession confession) async {
+    final all = loadConfessions()
+      ..removeWhere((c) => c.id == confession.id)
+      ..add(confession);
+    all.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    await _prefs?.setString(
+        _kConfessions, jsonEncode(all.map((c) => c.toJson()).toList()));
+  }
+
+  Future<void> deleteConfession(String id) async {
+    final all = loadConfessions()..removeWhere((c) => c.id == id);
+    await _prefs?.setString(
+        _kConfessions, jsonEncode(all.map((c) => c.toJson()).toList()));
+  }
+
+  /// Remove every confession. Uses remove() rather than writing an empty list
+  /// so nothing is left behind in the prefs file at all.
+  Future<void> clearConfessions() async {
+    await _prefs?.remove(_kConfessions);
   }
 
   // ---------------- Memory ----------------

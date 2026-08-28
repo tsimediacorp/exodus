@@ -4,13 +4,15 @@ import '../services/storage_service.dart';
 import '../widgets/app_drawer.dart';
 import 'chat_screen.dart';
 import 'coaching_screen.dart';
+import 'confessional_screen.dart';
 import 'devotional_screen.dart';
 import 'memory_screen.dart';
+import 'study_screen.dart';
 import 'together_screen.dart';
 
-/// Root navigation after the splash. Modes (Counsel / Coaching / Devotional)
-/// live in the left drawer; an IndexedStack keeps each mode's state alive. The
-/// drawer's chats section drives the Counsel conversation list.
+/// Root navigation after the splash. Modes live in the left drawer; an
+/// IndexedStack keeps each mode's state alive. The drawer's chats section
+/// drives the Counsel conversation list.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -81,9 +83,13 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _mode,
         children: [
+          // Order must match AppDrawer._modes exactly — the drawer's index is
+          // this stack's index.
           ChatScreen(key: _chatKey, onOpenMenu: _openMenu),
           CoachingScreen(onOpenMenu: _openMenu),
           DevotionalScreen(onOpenMenu: _openMenu),
+          StudyScreen(onOpenMenu: _openMenu),
+          ConfessionalScreen(onOpenMenu: _openMenu),
           TogetherScreen(onOpenMenu: _openMenu),
         ],
       ),

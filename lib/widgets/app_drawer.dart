@@ -41,10 +41,14 @@ class AppDrawer extends StatefulWidget {
     required this.onOpenMemory,
   });
 
+  /// Order is load-bearing: the index into this list is the index into
+  /// HomeShell's IndexedStack. Append or reorder both together.
   static const _modes = [
     (icon: Icons.menu_book_outlined, active: Icons.menu_book, label: 'Counsel'),
     (icon: Icons.spatial_audio_off_outlined, active: Icons.spatial_audio_off, label: 'Coaching'),
     (icon: Icons.wb_sunny_outlined, active: Icons.wb_sunny, label: 'Devotional'),
+    (icon: Icons.school_outlined, active: Icons.school, label: 'Bible Study'),
+    (icon: Icons.lock_outline, active: Icons.lock, label: 'Confessional'),
     (icon: Icons.favorite_outline, active: Icons.favorite, label: 'Together'),
   ];
 
