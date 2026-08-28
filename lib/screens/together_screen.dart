@@ -4,6 +4,7 @@ import '../services/amplify_service.dart';
 import '../services/together_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
+import 'prayer_wall_screen.dart';
 
 enum _Phase { loading, unavailable, needsAuth, needsPairing, ready }
 
@@ -59,11 +60,46 @@ class _TogetherScreenState extends State<TogetherScreen> {
           onPressed: widget.onOpenMenu,
         ),
         actions: [
+          if (_phase == _Phase.ready)
+            IconButton(
+              icon: const Icon(Icons.volunteer_activism_outlined,
+                  color: ExodusTheme.ironMist),
+              tooltip: 'Prayer wall',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PrayerWallScreen(
+                    coupleId: _couple!.id,
+                    userId: _userId!,
+                    members: _svc.memberIds(_couple!),
+                  ),
+                ),
+              ),
+            ),
           if (_phase == _Phase.ready || _phase == _Phase.needsPairing)
             IconButton(
               icon: const Icon(Icons.logout, color: ExodusTheme.ironMist),
               tooltip: 'Sign out',
               onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: ExodusTheme.midnight,
+                    title: const Text('Sign out?'),
+                    content: const Text(
+                        'You\'ll need to sign back in to reach your couples '
+                        'space, prayer wall, and daily question.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Sign out',
+                              style: TextStyle(color: ExodusTheme.crimson))),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
                 await _svc.signOut();
                 _bootstrap();
               },

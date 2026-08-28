@@ -33,6 +33,45 @@ class TogetherMessage {
       );
 }
 
+/// A prayer on the couple's wall (mirrors the backend Prayer model).
+/// Private prayers are visible only to their author — enforced by the data
+/// layer through `members`, the same way private messages are.
+class Prayer {
+  final String id;
+  final String authorId;
+  final String text;
+  final String visibility; // 'private' | 'shared'
+  final bool answered;
+  final DateTime? answeredAt;
+  final String answeredNote;
+  final DateTime createdAt;
+
+  Prayer({
+    required this.id,
+    required this.authorId,
+    required this.text,
+    required this.visibility,
+    required this.answered,
+    required this.createdAt,
+    this.answeredAt,
+    this.answeredNote = '',
+  });
+
+  bool get isShared => visibility == 'shared';
+
+  factory Prayer.fromJson(Map<String, dynamic> j) => Prayer(
+        id: j['id'] as String,
+        authorId: (j['authorId'] ?? '') as String,
+        text: (j['text'] ?? '') as String,
+        visibility: (j['visibility'] ?? 'shared').toString().toLowerCase(),
+        answered: (j['answered'] as bool?) ?? false,
+        answeredNote: (j['answeredNote'] ?? '') as String,
+        answeredAt: DateTime.tryParse((j['answeredAt'] ?? '') as String? ?? ''),
+        createdAt: DateTime.tryParse((j['createdAt'] ?? '') as String) ??
+            DateTime.fromMillisecondsSinceEpoch(0),
+      );
+}
+
 class Couple {
   final String id;
   final String member1Id;
@@ -86,11 +125,16 @@ class TogetherService {
 
   // ---------------- GraphQL helpers ----------------
 
+  /// Every backend call is bounded — without this a stalled request left the
+  /// Together tab spinning forever with no cancel and no escape.
+  static const _kTimeout = Duration(seconds: 20);
+
   Future<Map<String, dynamic>> _gql(String document,
       {Map<String, dynamic> variables = const {}}) async {
     final res = await Amplify.API
         .query(request: GraphQLRequest<String>(document: document, variables: variables))
-        .response;
+        .response
+        .timeout(_kTimeout);
     if (res.errors.isNotEmpty) {
       throw Exception(res.errors.map((e) => e.message).join('; '));
     }
@@ -101,7 +145,8 @@ class TogetherService {
       {Map<String, dynamic> variables = const {}}) async {
     final res = await Amplify.API
         .mutate(request: GraphQLRequest<String>(document: document, variables: variables))
-        .response;
+        .response
+        .timeout(_kTimeout);
     if (res.errors.isNotEmpty) {
       throw Exception(res.errors.map((e) => e.message).join('; '));
     }
@@ -182,6 +227,82 @@ class TogetherService {
       }
     ''', variables: {'cid': coupleId, 'text': text, 'vis': shared ? 'shared' : 'private'});
     return (data['askExodus'] as String?) ?? '';
+  }
+
+  // ---------------- Prayer wall ----------------
+
+  /// Every prayer this user is allowed to see: their own private ones plus
+  /// everything shared. The data layer does the filtering via `members`, so
+  /// the client never has to be trusted with a partner's private entries.
+  Future<List<Prayer>> listPrayers(String coupleId) async {
+    final data = await _gql('''
+      query Prayers(\$cid: ID!) {
+        listPrayers(filter: {coupleId: {eq: \$cid}}, limit: 300) {
+          items { id authorId text visibility answered answeredAt answeredNote createdAt }
+        }
+      }
+    ''', variables: {'cid': coupleId});
+    final items = (data['listPrayers']?['items'] as List?) ?? [];
+    final prayers = items
+        .map((e) => Prayer.fromJson(e as Map<String, dynamic>))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return prayers;
+  }
+
+  Future<void> addPrayer({
+    required String coupleId,
+    required String authorId,
+    required String text,
+    required bool shared,
+    required List<String> members,
+  }) async {
+    await _mutate('''
+      mutation AddPrayer(\$input: CreatePrayerInput!) {
+        createPrayer(input: \$input) { id }
+      }
+    ''', variables: {
+      'input': {
+        'coupleId': coupleId,
+        'authorId': authorId,
+        'text': text,
+        'visibility': shared ? 'shared' : 'private',
+        'answered': false,
+        // A private prayer's audience is its author alone; a shared one's is
+        // both partners. This array IS the access rule.
+        'members': shared ? members : [authorId],
+      }
+    });
+  }
+
+  Future<void> markPrayerAnswered({
+    required String id,
+    required bool answered,
+    String note = '',
+  }) async {
+    await _mutate('''
+      mutation AnswerPrayer(\$input: UpdatePrayerInput!) {
+        updatePrayer(input: \$input) { id }
+      }
+    ''', variables: {
+      'input': {
+        'id': id,
+        'answered': answered,
+        'answeredAt':
+            answered ? DateTime.now().toUtc().toIso8601String() : null,
+        'answeredNote': answered ? note : '',
+      }
+    });
+  }
+
+  Future<void> deletePrayer(String id) async {
+    await _mutate('''
+      mutation DeletePrayer(\$input: DeletePrayerInput!) {
+        deletePrayer(input: \$input) { id }
+      }
+    ''', variables: {
+      'input': {'id': id}
+    });
   }
 
   // ---------------- Daily quiz / alignment ----------------

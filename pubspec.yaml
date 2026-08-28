@@ -1,7 +1,7 @@
 name: exodus
 description: God's design. Unfiltered. Bible-based AI counsel for young couples.
 publish_to: 'none'
-version: 0.1.0+21
+version: 0.1.0+25
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -18,13 +18,18 @@ dependencies:
   flutter_webrtc: ^0.12.5
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
-  flutter_timezone: ^1.0.8
+  # 1.0.8 still referenced PluginRegistry.Registrar (the v1 Android embedding),
+  # which no longer exists in the engine — it fails to compile on Android at all.
+  flutter_timezone: ^5.1.0
   amplify_flutter: ^2.6.0
   amplify_auth_cognito: ^2.6.0
   amplify_api: ^2.6.0
   cupertino_icons: ^1.0.6
+  share_plus: ^13.3.0
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.14.1
 
@@ -32,12 +37,20 @@ flutter:
   uses-material-design: true
   assets:
     - .env
+    - assets/bible/
 
 flutter_launcher_icons:
   image_path: "assets/icon/exodus_icon.png"
   ios: true
   remove_alpha_ios: true
   background_color_ios: "#0A0E1A"
+  # The shield occupies roughly the middle half of the 1024px canvas, so it
+  # clears the adaptive-icon safe zone even with launcher parallax zoom — the
+  # same artwork can serve as the foreground without a separate crop.
+  android: "ic_launcher"
+  adaptive_icon_background: "#0A0E1A"
+  adaptive_icon_foreground: "assets/icon/exodus_icon.png"
+  min_sdk_android: 24
   web:
     generate: true
     image_path: "assets/icon/exodus_icon.png"

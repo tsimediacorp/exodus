@@ -75,6 +75,24 @@ const schema = a.schema({
     })
     .authorization((allow) => [allow.ownersDefinedIn('members')]),
 
+  // ---- Prayer wall ----
+  // Same confidentiality model as Message: `members` holds who may read it, so
+  // a private prayer stays on its author's device and a shared one reaches
+  // both partners. Answered prayers are kept, not deleted — the history of
+  // answered prayer is the point of the wall.
+  Prayer: a
+    .model({
+      coupleId: a.id().required(),
+      authorId: a.string().required(),
+      text: a.string().required(),
+      visibility: a.enum(['private', 'shared']),
+      answered: a.boolean(),
+      answeredAt: a.datetime(),
+      answeredNote: a.string(),
+      members: a.string().array(),
+    })
+    .authorization((allow) => [allow.ownersDefinedIn('members')]),
+
   // ---- Server-side counseling (confidential cross-partner) ----
   askExodus: a
     .mutation()

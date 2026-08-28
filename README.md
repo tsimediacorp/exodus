@@ -12,18 +12,45 @@ Venice or direct Zhipu).
 
 ```bash
 cd exodus
-# Generate the iOS scaffold (only iOS in this round; add more later)
-flutter create . --project-name exodus --org com.dreamviz --platforms=ios
 flutter pub get
 ```
 
-Then drop your OpenRouter key into `lib/config/api_keys.dart` and run:
+`ios/` and `android/` are both checked in. Drop your OpenRouter key into `.env`
+and run:
 
 ```bash
 flutter run
 ```
 
-To target other platforms later: `flutter create --platforms=android,web,macos .`
+## Android builds
+
+The Android toolchain needs a JDK, and the Homebrew `openjdk@17` install is
+keg-only so it never lands on `PATH`. Without this, `flutter doctor` reports
+"Could not determine java version" and every Gradle build fails:
+
+```bash
+flutter config --jdk-dir="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+```
+
+Then, for a sideloadable build — `--split-per-abi` matters, since the universal
+APK carries all three ABIs and is roughly triple the size:
+
+```bash
+flutter build apk --release --split-per-abi
+```
+
+`build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` is the one for any
+current phone. Release builds are signed with the **debug** keystore, which is
+fine for sideloading but will not do for the Play Store — that needs a real
+keystore in `android/key.properties` (gitignored), a `signingConfigs` block in
+`android/app/build.gradle.kts`, and `flutter build appbundle` instead.
+
+Three things in the Gradle config are workarounds for stale plugins rather than
+choices, and are commented as such where they live: `compileSdk` is forced to 36
+for every subproject because flutter_webrtc pins 31; `proguard-rules.pro`
+silences R8 warnings about Tink's compile-only annotations; and
+`flutter_timezone` had to go from 1.0.8 to 5.x because 1.0.8 referenced the
+long-removed v1 Android embedding.
 
 ## The master prompt — the most important file
 

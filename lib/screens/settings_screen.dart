@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config/master_prompt.dart';
+import '../services/check_in_service.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
 
@@ -16,7 +17,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _maxTokensCtrl;
   late double _temperature;
   late int _maxTokens;
+  String? _maxTokensError;
+  late bool _checkInsEnabled = StorageService.instance.loadCheckInsEnabled();
   late String _provider;
+  bool _scanning = false;
 
   @override
   void initState() {
@@ -115,10 +119,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _temperatureSlider(),
             const SizedBox(height: 16),
             _maxTokensField(),
+            const SizedBox(height: 28),
+            _sectionHeader('CHECK-INS'),
+            _checkInToggle(),
+            const SizedBox(height: 8),
+            _forceScanTile(),
           ],
         ),
       ),
     );
+  }
+
+  /// EXODUS reads stored memory to decide what to follow up on, so this has to
+  /// be refusable — and saves immediately rather than waiting for Save, since
+  /// turning it off is the kind of thing someone wants to take effect now.
+  Widget _checkInToggle() {
+    return SwitchListTile(
+      value: _checkInsEnabled,
+      onChanged: (v) async {
+        setState(() => _checkInsEnabled = v);
+        await StorageService.instance.saveCheckInsEnabled(v);
+      },
+      contentPadding: EdgeInsets.zero,
+      activeThumbColor: ExodusTheme.covenantGlow,
+      title: const Text('Let EXODUS follow up',
+          style: TextStyle(color: ExodusTheme.porcelain, fontSize: 15)),
+      subtitle: const Text(
+        'Looks back over what you have shared and checks in on things left '
+        'unresolved. At most one at a time, never sooner than a few days apart.',
+        style: TextStyle(color: ExodusTheme.ironMist, fontSize: 12, height: 1.4),
+      ),
+    );
+  }
+
+  /// Check-ins are paced in days, which makes them impossible to look at on a
+  /// fresh install. This runs the scan now and pulls one card forward so the
+  /// thing can actually be reviewed before release.
+  Widget _forceScanTile() {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      enabled: !_scanning,
+      onTap: _scanning ? null : _forceScan,
+      title: const Text('Check for a follow-up now',
+          style: TextStyle(color: ExodusTheme.porcelain, fontSize: 15)),
+      subtitle: const Text(
+        'Skips the usual few-days wait and raises one check-in immediately, '
+        'so you can see how it reads. For testing.',
+        style: TextStyle(color: ExodusTheme.ironMist, fontSize: 12, height: 1.4),
+      ),
+      trailing: _scanning
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: ExodusTheme.brass),
+            )
+          : const Icon(Icons.bolt_outlined, color: ExodusTheme.brass),
+    );
+  }
+
+  Future<void> _forceScan() async {
+    setState(() => _scanning = true);
+    final result = await CheckInService.instance.forceScanNow();
+    if (!mounted) return;
+    setState(() => _scanning = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.message),
+      duration: const Duration(seconds: 4),
+    ));
   }
 
   Widget _sectionHeader(String label) {
@@ -201,13 +269,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       controller: _maxTokensCtrl,
       keyboardType: TextInputType.number,
       style: const TextStyle(color: ExodusTheme.porcelain),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         labelText: 'Max tokens',
-        labelStyle: TextStyle(color: ExodusTheme.ironMist),
+        labelStyle: const TextStyle(color: ExodusTheme.ironMist),
+        // Invalid input used to be silently ignored — the field kept whatever
+        // it showed and quietly saved the old value.
+        errorText: _maxTokensError,
       ),
       onChanged: (v) {
-        final parsed = int.tryParse(v);
-        if (parsed != null && parsed > 0) _maxTokens = parsed;
+        final parsed = int.tryParse(v.trim());
+        setState(() {
+          if (v.trim().isEmpty) {
+            _maxTokensError = 'Enter a number';
+          } else if (parsed == null || parsed <= 0) {
+            _maxTokensError = 'Must be a positive whole number';
+          } else {
+            _maxTokensError = null;
+            _maxTokens = parsed;
+          }
+        });
       },
     );
   }

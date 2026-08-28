@@ -6,6 +6,7 @@ import '../config/master_prompt.dart';
 import '../config/api_keys.dart';
 import '../models/chat_message.dart';
 import 'memory_store.dart';
+import 'progress.dart';
 
 /// Routes requests to whichever provider is set in MasterPrompt.activeProvider.
 /// OpenAI-compatible providers (OpenRouter, Venice, Zhipu's OpenAI-compat
@@ -23,10 +24,17 @@ class AiService {
 
   /// Streamed completion via SSE. Yields content deltas as the model
   /// generates them. Throws on non-200 responses.
+  ///
+  /// [idleTimeout] bounds the GAP between chunks, not the total duration — it
+  /// resets on every event, so long replies stream fine but a provider that
+  /// accepts the connection and then stalls (never sending `[DONE]`, never
+  /// closing) fails fast instead of hanging the caller forever.
   Stream<String> askStream({
     required String userMessage,
     required List<ChatMessage> history,
     List<String> images = const [],
+    Duration idleTimeout = const Duration(seconds: 30),
+    ProgressController? progress,
   }) async* {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -57,6 +65,11 @@ class AiService {
     var attempt = 0;
     while (true) {
       try {
+        progress?.stage(
+          attempt == 0 ? 'Reaching EXODUS…' : 'Reconnecting…',
+          attempt: attempt + 1,
+          maxAttempts: 3,
+        );
         final request = http.Request('POST', Uri.parse(config.endpoint))
           ..headers.addAll(headers)
           ..body = body;
@@ -66,10 +79,12 @@ class AiService {
           final errBody = await response.stream.bytesToString();
           throw Exception('AI request failed (${response.statusCode}): $errBody');
         }
+        progress?.stage('Thinking…', attempt: attempt + 1, maxAttempts: 3);
 
         final lines = response.stream
             .transform(utf8.decoder)
-            .transform(const LineSplitter());
+            .transform(const LineSplitter())
+            .timeout(idleTimeout);
 
         await for (final line in lines) {
           if (!line.startsWith('data:')) continue;
@@ -86,6 +101,9 @@ class AiService {
             final delta = choice['delta'] as Map<String, dynamic>?;
             final content = delta?['content'] as String?;
             if (content != null && content.isNotEmpty) {
+              // First token is the moment the wait visibly ends — hand the UI
+              // back so it can swap the indicator for streaming text.
+              if (!yielded) progress?.done();
               yielded = true;
               yield content;
             }
@@ -98,6 +116,11 @@ class AiService {
         if (yielded) return; // partial reply already shown — keep it.
         if (attempt < 2 && _isTransient(e)) {
           attempt++;
+          progress?.stage(
+            _isOffline(e) ? 'No connection — retrying…' : 'Connection dropped — retrying…',
+            attempt: attempt + 1,
+            maxAttempts: 3,
+          );
           await Future.delayed(Duration(milliseconds: 700 * attempt));
           continue;
         }
@@ -108,11 +131,29 @@ class AiService {
 
   /// Transient errors worth retrying: dropped TLS handshakes, socket drops,
   /// timeouts, and the http client's generic connection failures.
-  static bool _isTransient(Object e) =>
-      e is SocketException ||
-      e is HandshakeException ||
-      e is TimeoutException ||
-      e is http.ClientException;
+  ///
+  /// Being offline is NOT transient — a failed DNS lookup means there's no
+  /// network at all, and retrying it three times with backoff just made the
+  /// user wait ~137s to be told something we knew on the first attempt.
+  static bool _isTransient(Object e) {
+    if (_isOffline(e)) return false;
+    return e is SocketException ||
+        e is HandshakeException ||
+        e is TimeoutException ||
+        e is http.ClientException;
+  }
+
+  /// A DNS failure — no route to the internet at all.
+  static bool _isOffline(Object e) {
+    if (e is SocketException) {
+      final msg = e.osError?.message ?? e.message;
+      return e.message.contains('Failed host lookup') ||
+          msg.contains('nodename nor servname') ||
+          msg.contains('Name or service not known') ||
+          msg.contains('No address associated with hostname');
+    }
+    return e.toString().contains('Failed host lookup');
+  }
 
   /// Non-streaming fallback. Kept for cases where the caller wants the
   /// finished string in one await.
@@ -122,6 +163,11 @@ class AiService {
     List<String> images = const [],
     int? maxTokens,
     Duration timeout = const Duration(seconds: 60),
+    ProgressController? progress,
+
+    /// What to say while the model is composing. The caller knows what it
+    /// asked for ("Writing today's devotional…"), so it words this.
+    String workingMessage = 'Thinking…',
   }) async {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -147,6 +193,11 @@ class AiService {
     var attempt = 0;
     while (true) {
       try {
+        progress?.stage(
+          attempt == 0 ? workingMessage : 'Reconnecting…',
+          attempt: attempt + 1,
+          maxAttempts: 3,
+        );
         response = await _client
             .post(Uri.parse(config.endpoint), headers: headers, body: body)
             .timeout(timeout);
@@ -154,6 +205,13 @@ class AiService {
       } on Exception catch (e) {
         if (attempt < 2 && _isTransient(e)) {
           attempt++;
+          progress?.stage(
+            _isOffline(e)
+                ? 'No connection — retrying…'
+                : 'Connection dropped — retrying…',
+            attempt: attempt + 1,
+            maxAttempts: 3,
+          );
           await Future.delayed(Duration(milliseconds: 700 * attempt));
           continue;
         }

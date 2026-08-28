@@ -1,9 +1,28 @@
 name: Deploy to Amplify
 
+# EXODUS spans TWO AWS accounts — this is the thing that trips everyone up:
+#
+#   Backend  (Cognito us-east-1_4n7wR1LTu, AppSync, DynamoDB, Lambdas)
+#            -> babysos account 698387659425, Amplify app d368xzowqbaf7t
+#            -> credentials: secrets.BACKEND_AWS_ACCESS_KEY_ID / _SECRET_ACCESS_KEY
+#
+#   Web host (Amplify Hosting app d1yaptreocjil0, main.d1yaptreocjil0.amplifyapp.com)
+#            -> a DIFFERENT account
+#            -> credentials: secrets.AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+#
+# Deploying the backend with the hosting account's credentials would build a
+# second, empty backend in the wrong account rather than updating the real one.
+# The two credential steps below are deliberately separate for that reason.
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: 'Also deploy amplify/ (auth, data, functions) to the babysos account'
+        type: boolean
+        default: false
 
 # Cancel an in-flight run if a newer commit lands on main
 concurrency:
@@ -17,9 +36,54 @@ jobs:
       AMPLIFY_APP_ID: d1yaptreocjil0
       AMPLIFY_BRANCH: main
       AWS_REGION: us-east-1
+      BACKEND_APP_ID: d368xzowqbaf7t
+      BACKEND_BRANCH: main
+      # Backend deploys are opt-in. `ampx pipeline-deploy` builds a BRANCH
+      # backend, which is a different stack from the sandbox the app currently
+      # points at — new Cognito pool, new tables, existing accounts do not come
+      # with it. Flip this on deliberately, not by merging a frontend change.
+      DEPLOY_BACKEND: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_backend || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # ---------- Backend (babysos account) ----------
+      # Runs before the web build so the bundle ships with config matching the
+      # backend it will actually talk to.
+
+      - name: Configure AWS credentials (backend account)
+        if: env.DEPLOY_BACKEND == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.BACKEND_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.BACKEND_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node
+        if: env.DEPLOY_BACKEND == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install backend dependencies
+        if: env.DEPLOY_BACKEND == 'true'
+        run: npm ci
+
+      # Deploys amplify/ and writes lib/amplify_outputs.dart directly. The app
+      # reads its config from that Dart file, not from the gitignored
+      # amplify_outputs.json, so emitting it here is what makes a schema change
+      # (a new model, a changed endpoint) actually reach the client.
+      - name: Deploy backend and regenerate Dart config
+        if: env.DEPLOY_BACKEND == 'true'
+        run: |
+          npx ampx pipeline-deploy \
+            --branch "$BACKEND_BRANCH" \
+            --app-id "$BACKEND_APP_ID" \
+            --outputs-format dart \
+            --outputs-out-dir lib
+
+      # ---------- App build ----------
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -37,13 +101,23 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
       - name: Build web bundle
         run: flutter build web --release
 
       - name: Zip build output
         run: cd build/web && zip -rq ../../web.zip .
 
-      - name: Configure AWS credentials
+      # ---------- Web hosting (separate account) ----------
+      # Re-configures credentials, replacing the backend account's if the
+      # backend step ran.
+
+      - name: Configure AWS credentials (hosting account)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -94,3 +168,5 @@ jobs:
         run: |
           echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
           echo "https://main.d1yaptreocjil0.amplifyapp.com" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Backend deployed: \`${{ env.DEPLOY_BACKEND }}\`" >> "$GITHUB_STEP_SUMMARY"
