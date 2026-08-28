@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:exodus/models/chat_message.dart';
 import 'package:exodus/theme/exodus_theme.dart';
+import 'package:exodus/widgets/drop_cap_text.dart';
 import 'package:exodus/widgets/message_bubble.dart';
 
 /// The chat redesign and in-conversation search both live here.
@@ -22,6 +23,14 @@ void main() {
       ChatMessage(content: text, sender: Sender.exodus, responseTimeMs: 4200);
   ChatMessage user(String text) =>
       ChatMessage(content: text, sender: Sender.user);
+
+  /// Tap the body of an EXODUS reply.
+  ///
+  /// The reply opens with an illuminated initial, so its first paragraph is
+  /// split across a capital and the run beside it — find.text on the whole
+  /// sentence no longer matches anything.
+  Future<void> tapReply(WidgetTester tester) =>
+      tester.tap(find.byType(DropCapText));
 
   /// Every span the bubble builds, flattened.
   ///
@@ -55,6 +64,36 @@ void main() {
       expect(find.text('EXODUS'), findsOneWidget);
     });
 
+    testWidgets('a reply opens with an illuminated initial', (tester) async {
+      await tester.pumpWidget(
+          host(MessageBubble(message: exodus('Sit with that a while.'))));
+      expect(find.byType(DropCapText), findsOneWidget);
+      // The capital is its own text run, in brass.
+      final cap = tester.widget<Text>(find.text('S'));
+      expect(cap.style?.color, ExodusTheme.brass);
+    });
+
+    testWidgets('a reply opening with a heading gets no capital',
+        (tester) async {
+      // Dropping a capital onto "**Next Step:**" would read as a mistake.
+      await tester.pumpWidget(host(MessageBubble(
+          message: exodus('**Next Step for This Week:**\n\nSit down together.'))));
+      expect(find.byType(DropCapText), findsNothing);
+    });
+
+    testWidgets('the question is set flush right without a bubble',
+        (tester) async {
+      await tester.pumpWidget(host(MessageBubble(message: user('We fought.'))));
+      expect(find.text('YOU ASKED'), findsOneWidget);
+      // No filled slab behind it any more.
+      final filled = tester
+          .widgetList<Container>(find.byType(Container))
+          .where((c) =>
+              c.decoration is BoxDecoration &&
+              (c.decoration as BoxDecoration).gradient != null);
+      expect(filled, isEmpty);
+    });
+
     testWidgets('a user message carries no speaker label', (tester) async {
       await tester.pumpWidget(host(MessageBubble(message: user('We fought.'))));
       expect(find.text('EXODUS'), findsNothing);
@@ -67,7 +106,7 @@ void main() {
       await tester.pumpWidget(host(MessageBubble(message: exodus('Answer.'))));
       expect(find.text('4.2s'), findsNothing);
 
-      await tester.tap(find.text('Answer.'));
+      await tapReply(tester);
       await tester.pumpAndSettle();
       expect(find.text('4.2s'), findsOneWidget);
     });
@@ -91,12 +130,12 @@ void main() {
       )));
       expect(find.text('Copy'), findsNothing);
 
-      await tester.tap(find.text('Answer.'));
+      await tapReply(tester);
       await tester.pumpAndSettle();
       expect(find.text('Copy'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
 
-      await tester.tap(find.text('Answer.'));
+      await tapReply(tester);
       await tester.pumpAndSettle();
       expect(find.text('Copy'), findsNothing);
     });
@@ -105,7 +144,7 @@ void main() {
       final streaming = ChatMessage(
           content: 'Half a th', sender: Sender.exodus, isStreaming: true);
       await tester.pumpWidget(host(MessageBubble(message: streaming)));
-      await tester.tap(find.text('Half a th'));
+      await tapReply(tester);
       // pump, not pumpAndSettle: the streaming cursor pulses forever, so
       // settling never completes.
       await tester.pump(const Duration(milliseconds: 50));

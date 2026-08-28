@@ -627,7 +627,30 @@ class ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _searching ? _searchBar() : _appBar(),
-      body: SafeArea(
+      body: Stack(
+        children: [
+          // A warmth behind the top of the thread. Obsidian on its own is
+          // cold; this is what keeps a page of brass-and-parchment prose from
+          // reading as a terminal.
+          Positioned(
+            top: -170,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Container(
+                height: 340,
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    colors: [
+                      ExodusTheme.brass.withValues(alpha: 0.10),
+                      ExodusTheme.brass.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
         child: Column(
           children: [
             // Something EXODUS remembered and means to come back to. Sits
@@ -643,6 +666,8 @@ class ChatScreenState extends State<ChatScreen> {
             if (_searching) _searchFooter() else _buildInputBar(),
           ],
         ),
+          ),
+        ],
       ),
     );
   }
@@ -672,8 +697,9 @@ class ChatScreenState extends State<ChatScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
+                fontFamily: ExodusTheme.serif,
                 color: ExodusTheme.porcelain,
-                fontSize: 15,
+                fontSize: 17,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.2,
               )),
@@ -1036,9 +1062,9 @@ class ChatScreenState extends State<ChatScreen> {
       // end; the send button now sits inside the same object it acts on.
       child: Container(
         decoration: BoxDecoration(
-          color: ExodusTheme.slate,
-          border: Border.all(color: ExodusTheme.steel),
-          borderRadius: BorderRadius.circular(24),
+          color: ExodusTheme.slate.withValues(alpha: 0.6),
+          border: Border.all(color: ExodusTheme.brass.withValues(alpha: 0.20)),
+          borderRadius: BorderRadius.circular(26),
         ),
         padding: EdgeInsets.fromLTRB(6, _pendingImages.isNotEmpty ? 10 : 5, 5, 5),
         child: Column(
@@ -1074,7 +1100,9 @@ class ChatScreenState extends State<ChatScreen> {
                       textInputAction: TextInputAction.newline,
                       cursorColor: ExodusTheme.covenantGlow,
                       style: const TextStyle(
-                          color: ExodusTheme.porcelain, fontSize: 15),
+                          fontFamily: ExodusTheme.serif,
+                          color: ExodusTheme.parchment,
+                          fontSize: 16),
                       // The field is inside the pill now, so it must not draw
                       // the app-wide fill and outline of its own.
                       decoration: const InputDecoration(
@@ -1084,7 +1112,13 @@ class ChatScreenState extends State<ChatScreen> {
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
-                        hintText: 'Ask EXODUS...',
+                        hintText: 'Ask EXODUS…',
+                        hintStyle: TextStyle(
+                          fontFamily: ExodusTheme.serif,
+                          color: ExodusTheme.ironMist,
+                          fontSize: 16,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ),
                   ),
@@ -1108,8 +1142,8 @@ class ChatScreenState extends State<ChatScreen> {
                         gradient: (!_sending && canSend)
                             ? const LinearGradient(
                                 colors: [
-                                  ExodusTheme.covenantBlue,
-                                  ExodusTheme.covenantGlow
+                                  ExodusTheme.brassGlow,
+                                  ExodusTheme.brass
                                 ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -1120,9 +1154,9 @@ class ChatScreenState extends State<ChatScreen> {
                         boxShadow: (!_sending && canSend)
                             ? [
                                 BoxShadow(
-                                  color: ExodusTheme.covenantBlue
-                                      .withValues(alpha: 0.4),
-                                  blurRadius: 12,
+                                  color: ExodusTheme.brass
+                                      .withValues(alpha: 0.34),
+                                  blurRadius: 14,
                                   spreadRadius: 1,
                                 ),
                               ]
@@ -1130,9 +1164,12 @@ class ChatScreenState extends State<ChatScreen> {
                       ),
                       child: Icon(
                         _sending ? Icons.stop_rounded : Icons.arrow_upward,
-                        color: (_sending || canSend)
-                            ? ExodusTheme.porcelain
-                            : ExodusTheme.ironMist,
+                        // Dark glyph on brass; porcelain on brass is unreadable.
+                        color: (!_sending && canSend)
+                            ? ExodusTheme.obsidian
+                            : (_sending
+                                ? ExodusTheme.porcelain
+                                : ExodusTheme.ironMist),
                         size: _sending ? 18 : 20,
                       ),
                     ),

@@ -8,6 +8,7 @@ import '../services/bible_service.dart';
 import '../services/conversation_search.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
+import 'drop_cap_text.dart';
 import 'exodus_shield.dart';
 import 'scripture_link.dart';
 
@@ -79,49 +80,76 @@ class _MessageBubbleState extends State<MessageBubble> {
     setState(() => _showActions = !_showActions);
   }
 
-  /// Tappable chips for every passage cited in this reply.
-  Widget _scriptureChips() {
+  /// Scripture EXODUS cited, set as illuminated blocks rather than chips.
+  ///
+  /// A chip is a filter control; these are passages. Quoting the verse under a
+  /// brass rule makes the citation readable where it stands, instead of asking
+  /// the couple to tap away to find out what it says. Still tappable, and still
+  /// opens the in-app Bible at the passage.
+  Widget _scriptureBlocks() {
     final refs = BibleService.instance.findAll(widget.message.content);
     if (refs.isEmpty) return const SizedBox.shrink();
+    final bible = BibleService.instance;
+
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        children: [
-          for (final ref in refs.take(6))
-            Semantics(
-              button: true,
-              label: 'Open ${BibleService.instance.label(ref)} in the Bible',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () => openScripture(context, ref),
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 34),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: ExodusTheme.brass.withValues(alpha: 0.08),
-                    border: Border.all(
-                        color: ExodusTheme.brass.withValues(alpha: 0.38)),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.menu_book_rounded,
-                          size: 13, color: ExodusTheme.brass),
-                      const SizedBox(width: 6),
-                      Text(BibleService.instance.label(ref),
+      padding: const EdgeInsets.only(top: 20),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+                color: ExodusTheme.brass.withValues(alpha: 0.55), width: 2),
+          ),
+        ),
+        padding: const EdgeInsets.only(left: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final ref in refs.take(4))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Semantics(
+                  button: true,
+                  label: 'Open ${bible.label(ref)} in the Bible',
+                  child: InkWell(
+                    onTap: () => openScripture(context, ref),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // The verse itself, when the translation is loaded.
+                        // Without it this degrades to just the reference,
+                        // which is what the chips always were.
+                        if (bible.textFor(ref).isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 7),
+                            child: Text(
+                              '\u201C${bible.textFor(ref)}\u201D',
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: ExodusTheme.serif,
+                                color: ExodusTheme.parchment,
+                                fontSize: 16,
+                                height: 1.68,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        Text(
+                          bible.label(ref).toUpperCase(),
                           style: const TextStyle(
-                              color: ExodusTheme.brass,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                    ],
+                            color: ExodusTheme.brass,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.6,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -134,20 +162,34 @@ class _MessageBubbleState extends State<MessageBubble> {
     ));
   }
 
-  /// Base style for reply prose. Assistant text is lighter than the user's so
-  /// the two turns read differently even without a box around each.
+  /// EXODUS speaks in the reading face. The replies are long-form devotional
+  /// prose, and a serif at this measure is what makes them read as something
+  /// to sit with rather than a chat message to skim.
   static const TextStyle _exodusText = TextStyle(
-    color: ExodusTheme.porcelain,
-    fontSize: 15,
-    height: 1.62,
-    fontWeight: FontWeight.w400,
+    fontFamily: ExodusTheme.serif,
+    color: ExodusTheme.parchment,
+    fontSize: 17,
+    height: 1.78,
+    fontWeight: FontWeight.w300,
   );
 
+  /// The illuminated initial. Sized to drop two lines.
+  static const TextStyle _capText = TextStyle(
+    fontFamily: ExodusTheme.serif,
+    color: ExodusTheme.brass,
+    fontSize: 50,
+    height: 0.92,
+    fontWeight: FontWeight.w600,
+  );
+
+  /// The question is the prompt, not the point: smaller, quieter, italic, and
+  /// set flush right without a bubble.
   static const TextStyle _userText = TextStyle(
-    color: ExodusTheme.porcelain,
+    fontFamily: ExodusTheme.serif,
+    color: ExodusTheme.ironMist,
     fontSize: 15,
-    height: 1.55,
-    fontWeight: FontWeight.w500,
+    height: 1.5,
+    fontStyle: FontStyle.italic,
   );
 
   /// Split [text] into spans, tinting every occurrence of the search term.
@@ -204,9 +246,43 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
     if (_isUser) {
       return SelectableText(message.content,
-          style: style, onTap: _toggleActions);
+          style: style, textAlign: TextAlign.right, onTap: _toggleActions);
     }
-    return GptMarkdown(message.content, style: style);
+    return _illuminated(message.content, style);
+  }
+
+  /// A reply, opened with an illuminated initial.
+  ///
+  /// Only the FIRST paragraph gets the treatment, and only when it is plain
+  /// prose. Everything after it goes through the markdown renderer as before,
+  /// because replies routinely carry bold headings and lists that a drop cap
+  /// would fight. A reply that opens with a heading or a list gets no capital
+  /// at all — dropping a capital onto "**Next Step:**" would look like a
+  /// mistake rather than a flourish.
+  Widget _illuminated(String content, TextStyle style) {
+    final text = content.trimLeft();
+    final split = text.indexOf('\n\n');
+    final first = (split == -1 ? text : text.substring(0, split)).trim();
+    final rest = split == -1 ? '' : text.substring(split).trim();
+
+    final plainOpening = first.isNotEmpty &&
+        RegExp(r'^[A-Za-z]').hasMatch(first) &&
+        !RegExp(r'[*_`#\[\]|]').hasMatch(first);
+
+    if (!plainOpening) {
+      return GptMarkdown(content, style: style);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropCapText(text: first, style: style, capStyle: _capText),
+        if (rest.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          GptMarkdown(rest, style: style),
+        ],
+      ],
+    );
   }
 
   @override
@@ -219,52 +295,44 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
-  /// The user still gets a bubble — it is the shorter turn, and the fill is
-  /// what tells you at a glance who is speaking.
+  /// The question, set as a standfirst rather than a bubble.
+  ///
+  /// It loses its filled pill entirely: in a thread where the answer is the
+  /// substance, a saturated blue slab for "can you give us some verses" pulls
+  /// more weight than the question deserves. A caps label and italic serif
+  /// flush right say who is speaking without competing.
   Widget _userTurn(BuildContext context) {
     final message = widget.message;
     final hasText = message.content.trim().isNotEmpty;
-    // Capped so a reply never spans the full width; a full-width blue slab is
-    // most of what made the old thread read as a stack of containers.
-    final maxWidth = MediaQuery.sizeOf(context).width * 0.78;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        const Text('YOU ASKED',
+            style: TextStyle(
+              color: ExodusTheme.ironMist,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.6,
+            )),
+        const SizedBox(height: 6),
         ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxWidth),
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.72),
           child: Semantics(
             button: true,
             label: 'Your message. Tap for options.',
             child: GestureDetector(
               onTap: _toggleActions,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [ExodusTheme.covenantBlue, Color(0xFF2D5BC8)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(18),
-                    topRight: Radius.circular(18),
-                    bottomLeft: Radius.circular(18),
-                    // The one clipped corner points at the sender.
-                    bottomRight: Radius.circular(6),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (message.images.isNotEmpty)
-                      _AttachedImages(
-                          images: message.images, hasText: hasText),
-                    if (hasText) _content(_userText),
-                  ],
-                ),
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (message.images.isNotEmpty)
+                    _AttachedImages(images: message.images, hasText: hasText),
+                  if (hasText) _content(_userText),
+                ],
               ),
             ),
           ),
@@ -295,15 +363,20 @@ class _MessageBubbleState extends State<MessageBubble> {
             const Text('EXODUS',
                 style: TextStyle(
                   color: ExodusTheme.brass,
-                  fontSize: 10,
+                  fontSize: 9,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: 1.4,
+                  letterSpacing: 2,
                 )),
             const SizedBox(width: 12),
             Expanded(
               child: Container(
                 height: 1,
-                color: ExodusTheme.brass.withValues(alpha: 0.22),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    ExodusTheme.brass.withValues(alpha: 0.45),
+                    ExodusTheme.brass.withValues(alpha: 0.05),
+                  ]),
+                ),
               ),
             ),
           ],
@@ -314,6 +387,10 @@ class _MessageBubbleState extends State<MessageBubble> {
           label: 'EXODUS reply. Tap for options.',
           child: GestureDetector(
             onTap: _toggleActions,
+            // Opaque, so the whitespace beside a short line responds too.
+            // With deferToChild only the painted glyphs were tappable, which
+            // makes "tap for options" a hunt on a one-line reply.
+            behavior: HitTestBehavior.opaque,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -338,7 +415,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         // passage. Chips rather than inline links because the reply is
         // rendered as markdown, and rewriting its spans would fight the
         // renderer.
-        if (!message.isStreaming) _scriptureChips(),
+        if (!message.isStreaming) _scriptureBlocks(),
         // How long it took moved into the action row. Standing alone under
         // every reply it read as debug output left switched on.
         if (_showActions && _canShowActions) _actionBar(),

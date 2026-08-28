@@ -16,6 +16,14 @@ class ExodusTheme {
   static const Color brassGlow     = Color(0xFFE5C880);  // shield highlight
   static const Color crimson       = Color(0xFFB94545);  // danger / sin
 
+  /// Warm off-white for long-form reading. Slightly yellowed against
+  /// [porcelain] so a page of serif prose reads as paper rather than screen.
+  static const Color parchment     = Color(0xFFEDE6DA);
+
+  /// The reading face. Bundled (see pubspec) and used for EXODUS's replies,
+  /// scripture and titles — not for UI chrome, which stays sans.
+  static const String serif        = 'Spectral';
+
   static ThemeData build() {
     return ThemeData(
       brightness: Brightness.dark,
