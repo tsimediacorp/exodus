@@ -27,6 +27,7 @@ class _HomeShellState extends State<HomeShell> {
 
   static const int _counselMode = 0;
   static const int _devotionalMode = 2;
+  static const int _studyMode = 3;
 
   @override
   void initState() {
@@ -88,7 +89,7 @@ class _HomeShellState extends State<HomeShell> {
           ChatScreen(key: _chatKey, onOpenMenu: _openMenu),
           CoachingScreen(onOpenMenu: _openMenu),
           DevotionalScreen(onOpenMenu: _openMenu),
-          StudyScreen(onOpenMenu: _openMenu),
+          StudyScreen(onOpenMenu: _openMenu, isActive: _mode == _studyMode),
           ConfessionalScreen(onOpenMenu: _openMenu),
           TogetherScreen(onOpenMenu: _openMenu),
         ],

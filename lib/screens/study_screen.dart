@@ -15,7 +15,17 @@ import 'study_history_screen.dart';
 /// The daily Bible study exercise — something to do, not something to read.
 class StudyScreen extends StatefulWidget {
   final VoidCallback? onOpenMenu;
-  const StudyScreen({super.key, this.onOpenMenu});
+
+  /// Whether this is the mode currently on screen.
+  ///
+  /// HomeShell keeps every mode alive in an IndexedStack, which builds all of
+  /// them at launch — so without this the app would generate an exercise on
+  /// every cold start, for every user, whether or not they ever open the tab.
+  /// It would also do it alongside the devotional's generation and the
+  /// check-in scan, three AI calls racing each other into the same rate limit.
+  final bool isActive;
+
+  const StudyScreen({super.key, this.onOpenMenu, this.isActive = false});
 
   @override
   State<StudyScreen> createState() => _StudyScreenState();
@@ -43,6 +53,13 @@ class _StudyScreenState extends State<StudyScreen> {
   }
 
   @override
+  void didUpdateWidget(StudyScreen old) {
+    super.didUpdateWidget(old);
+    // Generate the first time the tab is actually opened, not before.
+    if (!old.isActive && widget.isActive) _load();
+  }
+
+  @override
   void dispose() {
     // Abandon any in-flight generation: its token can never match again.
     _generation++;
@@ -58,6 +75,9 @@ class _StudyScreenState extends State<StudyScreen> {
       _today = stored;
       _notes.text = stored?.notes ?? '';
     });
+    // Reading what is stored is free and keeps the tab instant when opened.
+    // Generating is not, so it waits until someone is actually looking.
+    if (!widget.isActive) return;
     if (StudyExercise.needsGeneration(stored)) await _ensureToday();
   }
 
