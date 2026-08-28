@@ -842,67 +842,77 @@ class ChatScreenState extends State<ChatScreen> {
 
   Widget _buildWelcome() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+      padding: const EdgeInsets.fromLTRB(24, 44, 24, 32),
       child: Column(
         children: [
-          const SizedBox(height: 20),
-          const ExodusShield(size: 96),
-          const SizedBox(height: 28),
+          const ExodusShield(size: 88),
+          const SizedBox(height: 30),
           const Text(
             'Walk in His design.',
             style: TextStyle(
               color: ExodusTheme.porcelain,
-              fontSize: 24,
+              fontSize: 25,
               fontWeight: FontWeight.w600,
+              letterSpacing: -0.3,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 10),
-          const Text(
-            'Scripture-first answers for the questions that matter most in your marriage.',
-            style: TextStyle(
-              color: ExodusTheme.ironMist,
-              fontSize: 14,
-              height: 1.5,
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 300),
+            child: const Text(
+              'Scripture-first answers for the questions that matter most in your marriage.',
+              style: TextStyle(
+                color: ExodusTheme.ironMist,
+                fontSize: 14,
+                height: 1.55,
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 36),
+          const SizedBox(height: 40),
           ..._starters.map(_buildStarter),
         ],
       ),
     );
   }
 
+  /// A conversation starter.
+  ///
+  /// The outline comes off: four bordered cards in a column read as a form to
+  /// fill in. Fill alone separates them from the ground, and the brass mark
+  /// carries the invitation.
   Widget _buildStarter(String prompt) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 9),
       child: InkWell(
         onTap: () => _send(prompt),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          constraints: const BoxConstraints(minHeight: 56),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: ExodusTheme.midnight,
-            border: Border.all(color: ExodusTheme.steel),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
             children: [
               const Icon(Icons.auto_awesome,
                   size: 16, color: ExodusTheme.brass),
-              const SizedBox(width: 12),
+              const SizedBox(width: 13),
               Expanded(
                 child: Text(
                   prompt,
                   style: const TextStyle(
                     color: ExodusTheme.porcelain,
                     fontSize: 14,
+                    height: 1.45,
                   ),
                 ),
               ),
-              const Icon(Icons.arrow_forward,
-                  size: 14, color: ExodusTheme.ironMist),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: ExodusTheme.ironMist),
             ],
           ),
         ),
