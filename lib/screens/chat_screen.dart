@@ -17,6 +17,7 @@ import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/check_in_card.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/page_backdrop.dart';
 import '../widgets/progress_view.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -635,37 +636,8 @@ class ChatScreenState extends State<ChatScreen> {
       // The body runs behind the bar, so the light is one continuous wash
       // rather than something that begins under a hard edge.
       extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          // A warmth behind the top of the page. Obsidian on its own is cold,
-          // and this is what keeps brass-and-parchment prose from reading as
-          // a terminal.
-          //
-          // Positioned.fill, NOT a fixed-height box: a radial gradient fades
-          // to transparent in a CIRCLE, but its container still ends in a
-          // rectangle. The previous 340px box cut the fade off 170px from its
-          // centre while the gradient still had 289px to run, which drew a
-          // hard horizontal line straight across the thread. Filling the
-          // Stack means the only edges are the screen's own.
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    // Centred above the top edge, so it reads as light
-                    // falling onto the page rather than a glow sitting on it.
-                    center: const Alignment(-0.45, -1.15),
-                    radius: 0.95,
-                    colors: [
-                      ExodusTheme.brass.withValues(alpha: 0.13),
-                      ExodusTheme.brass.withValues(alpha: 0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
+      body: PageBackdrop(
+        child: SafeArea(
         child: Column(
           children: [
             // Clears the transparent bar the body now runs behind.
@@ -683,8 +655,7 @@ class ChatScreenState extends State<ChatScreen> {
             if (_searching) _searchFooter() else _buildInputBar(),
           ],
         ),
-          ),
-        ],
+        ),
       ),
     );
   }
