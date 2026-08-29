@@ -63,6 +63,11 @@ class ChatScreenState extends State<ChatScreen> {
   /// Cap attachments per message to keep request payloads sane.
   static const int _maxAttachments = 4;
 
+  /// Height of the top bar. Shared by the normal bar, the search bar and the
+  /// body's top offset — the body runs BEHIND the bar so the warm light is
+  /// continuous, which means these three have to agree.
+  static const double _barHeight = 62;
+
   // ---------------- In-conversation search ----------------
 
   final TextEditingController _search = TextEditingController();
@@ -627,24 +632,32 @@ class ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _searching ? _searchBar() : _appBar(),
+      // The body runs behind the bar, so the light is one continuous wash
+      // rather than something that begins under a hard edge.
+      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // A warmth behind the top of the thread. Obsidian on its own is
-          // cold; this is what keeps a page of brass-and-parchment prose from
-          // reading as a terminal.
-          Positioned(
-            top: -170,
-            left: 0,
-            right: 0,
+          // A warmth behind the top of the page. Obsidian on its own is cold,
+          // and this is what keeps brass-and-parchment prose from reading as
+          // a terminal.
+          //
+          // Positioned.fill, NOT a fixed-height box: a radial gradient fades
+          // to transparent in a CIRCLE, but its container still ends in a
+          // rectangle. The previous 340px box cut the fade off 170px from its
+          // centre while the gradient still had 289px to run, which drew a
+          // hard horizontal line straight across the thread. Filling the
+          // Stack means the only edges are the screen's own.
+          Positioned.fill(
             child: IgnorePointer(
-              child: Container(
-                height: 340,
+              child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
-                    center: const Alignment(-0.45, 0),
-                    radius: 0.85,
+                    // Centred above the top edge, so it reads as light
+                    // falling onto the page rather than a glow sitting on it.
+                    center: const Alignment(-0.45, -1.15),
+                    radius: 0.95,
                     colors: [
-                      ExodusTheme.brass.withValues(alpha: 0.12),
+                      ExodusTheme.brass.withValues(alpha: 0.13),
                       ExodusTheme.brass.withValues(alpha: 0),
                     ],
                   ),
@@ -655,6 +668,8 @@ class ChatScreenState extends State<ChatScreen> {
           SafeArea(
         child: Column(
           children: [
+            // Clears the transparent bar the body now runs behind.
+            const SizedBox(height: _barHeight),
             // Something EXODUS remembered and means to come back to. Sits
             // above the thread rather than interrupting it, and only when
             // nothing is being sent. Hidden while searching: it would shift
@@ -680,8 +695,13 @@ class ChatScreenState extends State<ChatScreen> {
 
     return AppBar(
       titleSpacing: 0,
-      toolbarHeight: 62,
+      toolbarHeight: _barHeight,
       centerTitle: false,
+      // Transparent, so the light behind the page runs unbroken from the very
+      // top instead of starting abruptly beneath an opaque bar.
+      backgroundColor: Colors.transparent,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
       // The shield IS the menu button: one mark doing two jobs. Before this
       // the brand vanished the moment you opened a conversation, so the screen
       // people spend all their time on carried no mark at all — and a stock
@@ -771,7 +791,10 @@ class ChatScreenState extends State<ChatScreen> {
       titleSpacing: 0,
       // Matches the main bar, so swapping into search does not jump the
       // thread by the difference in bar height.
-      toolbarHeight: 62,
+      toolbarHeight: _barHeight,
+      backgroundColor: Colors.transparent,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
       leading: IconButton(
         icon: const Icon(Icons.close_rounded, color: ExodusTheme.ironMist),
         tooltip: 'Close search',
