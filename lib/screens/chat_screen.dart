@@ -641,8 +641,10 @@ class ChatScreenState extends State<ChatScreen> {
                 height: 340,
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
+                    center: const Alignment(-0.45, 0),
+                    radius: 0.85,
                     colors: [
-                      ExodusTheme.brass.withValues(alpha: 0.10),
+                      ExodusTheme.brass.withValues(alpha: 0.12),
                       ExodusTheme.brass.withValues(alpha: 0),
                     ],
                   ),
@@ -674,17 +676,34 @@ class ChatScreenState extends State<ChatScreen> {
 
   PreferredSizeWidget _appBar() {
     final title = _current?.title.trim() ?? '';
+    final count = _messages.length;
+
     return AppBar(
       titleSpacing: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.menu, color: ExodusTheme.ironMist),
-        tooltip: 'Menu',
-        onPressed: widget.onOpenMenu,
+      toolbarHeight: 62,
+      centerTitle: false,
+      // The shield IS the menu button: one mark doing two jobs. Before this
+      // the brand vanished the moment you opened a conversation, so the screen
+      // people spend all their time on carried no mark at all — and a stock
+      // hamburger was spending a whole slot to say nothing.
+      leadingWidth: 58,
+      leading: Semantics(
+        button: true,
+        label: 'Menu',
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: widget.onOpenMenu,
+          child: const Padding(
+            padding: EdgeInsets.only(left: 14),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ExodusShield(size: 21, glow: false),
+            ),
+          ),
+        ),
       ),
-      // One line, not two. The conversation's name IS the title once there is
-      // one — stacking it under a wordmark left both cramped and the name
-      // truncated. (It also inherited the wordmark's 3.0 letterSpacing from
-      // the app bar theme, which spaced it out like a ransom note.)
+      // Left-aligned, so a long conversation name runs into the width of the
+      // bar instead of ellipsing at both ends inside a centred block.
       title: title.isEmpty
           ? const Text('EXODUS',
               style: TextStyle(
@@ -693,28 +712,50 @@ class ChatScreenState extends State<ChatScreen> {
                 fontWeight: FontWeight.w600,
                 letterSpacing: 3,
               ))
-          : Text(title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: ExodusTheme.serif,
-                color: ExodusTheme.porcelain,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.2,
-              )),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: ExodusTheme.serif,
+                      color: ExodusTheme.parchment,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 0.1,
+                    )),
+                if (count > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Text(
+                      count == 1 ? '1 message' : '$count messages',
+                      style: TextStyle(
+                        color: ExodusTheme.ironMist.withValues(alpha: 0.72),
+                        fontSize: 10,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.search_rounded, color: ExodusTheme.ironMist),
+          icon: const Icon(Icons.search_rounded,
+              color: ExodusTheme.ironMist, size: 21),
           tooltip: 'Search this conversation',
           onPressed: _messages.isEmpty ? null : _openSearch,
         ),
+        // Brass, because starting a new conversation is the one creative
+        // action up here; the rest are navigation.
         IconButton(
-          icon: const Icon(Icons.add_comment_outlined,
-              color: ExodusTheme.ironMist),
+          icon: const Icon(Icons.add_rounded,
+              color: ExodusTheme.brass, size: 23),
           tooltip: 'New conversation',
           onPressed: newConversation,
         ),
+        const SizedBox(width: 2),
         // Settings moved out of here — it is pinned at the bottom of the
         // drawer, reachable from every mode, and this bar needed the room.
       ],
@@ -728,6 +769,9 @@ class ChatScreenState extends State<ChatScreen> {
     final hasQuery = _search.text.trim().isNotEmpty;
     return AppBar(
       titleSpacing: 0,
+      // Matches the main bar, so swapping into search does not jump the
+      // thread by the difference in bar height.
+      toolbarHeight: 62,
       leading: IconButton(
         icon: const Icon(Icons.close_rounded, color: ExodusTheme.ironMist),
         tooltip: 'Close search',
