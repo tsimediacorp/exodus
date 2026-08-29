@@ -20,6 +20,7 @@ class RealtimeVoiceService {
   RTCPeerConnection? _pc;
   RTCDataChannel? _dc;
   MediaStream? _localStream;
+  MediaStream? _remoteStream;
   Timer? _connectTimeout;
 
   /// Coarse session state for the UI (the orb, status line).
@@ -39,6 +40,11 @@ class RealtimeVoiceService {
 
   bool get isConnected =>
       _pc != null && state.value != VoiceState.error && state.value != VoiceState.closed;
+
+  /// Whether the coach's audio track has actually arrived. A session can reach
+  /// "connected" with no inbound audio — that is the shape of a silent
+  /// session, so it is worth being able to tell the two apart.
+  bool get hasCoachAudio => _remoteStream != null;
 
   /// Build the realtime session config (GA schema): instructions, voice,
   /// server-VAD turn detection (enables natural barge-in), and input
@@ -124,9 +130,12 @@ class RealtimeVoiceService {
       });
       _pc = pc;
 
-      // The model's audio track plays automatically once attached to the
-      // peer connection — no manual buffering needed with WebRTC.
-      pc.onTrack = (RTCTrackEvent e) {};
+      // Hold the coach's stream. WebRTC plays a remote audio track without a
+      // renderer, but nothing else references the stream, so keeping it is
+      // what stops it being collected mid-session.
+      pc.onTrack = (RTCTrackEvent e) {
+        if (e.streams.isNotEmpty) _remoteStream = e.streams.first;
+      };
       pc.onConnectionState = (s) {
         if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
             s == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
@@ -134,9 +143,16 @@ class RealtimeVoiceService {
         }
       };
 
-      // Mic capture.
-      _localStream = await navigator.mediaDevices
-          .getUserMedia({'audio': true, 'video': false});
+      // Mic capture. A denial throws here, and the raw platform exception is
+      // not something to show a couple, so it is named plainly.
+      try {
+        _localStream = await navigator.mediaDevices
+            .getUserMedia({'audio': true, 'video': false});
+      } catch (e) {
+        throw Exception(
+            'EXODUS needs microphone access for a live session. Allow it in '
+            'your phone settings, then start again.');
+      }
       for (final track in _localStream!.getAudioTracks()) {
         await pc.addTrack(track, _localStream!);
       }
@@ -172,6 +188,20 @@ class RealtimeVoiceService {
         throw Exception('SDP exchange failed (${sdpRes.statusCode}): ${sdpRes.body}');
       }
       await pc.setRemoteDescription(RTCSessionDescription(sdpRes.body, 'answer'));
+
+      // Route the coach to the LOUDSPEAKER. WebRTC defaults to the earpiece —
+      // the phone assumes a private call — so without this the coach speaks
+      // into the receiver at call volume, which is indistinguishable from no
+      // audio at all unless you happen to hold the phone to your ear. A
+      // coaching session is for two people in a room, so it belongs on the
+      // speaker. Best-effort: never fail a working session over routing.
+      try {
+        await Helper.ensureAudioSession();
+        await Helper.setSpeakerphoneOn(true);
+      } catch (_) {
+        // Older OS or an unusual audio route; the session still works.
+      }
+
       state.value = VoiceState.connected;
 
       // Surface a failure instead of hanging on "Connecting…" if the data
@@ -249,9 +279,15 @@ class RealtimeVoiceService {
   Future<void> hangUp() async {
     _connectTimeout?.cancel();
     try {
+      // Hand the earpiece/speaker routing back before tearing down, or the
+      // phone can stay in speaker mode after the session ends.
+      try {
+        await Helper.setSpeakerphoneOn(false);
+      } catch (_) {/* routing is best-effort */}
       await _dc?.close();
       _localStream?.getTracks().forEach((t) => t.stop());
       await _localStream?.dispose();
+      _remoteStream = null;
       await _pc?.close();
     } catch (_) {
       // Best-effort teardown.

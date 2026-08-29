@@ -21,11 +21,34 @@ class TtsService {
   Future<void> _init() async {
     if (_initialized) return;
     _initialized = true;
+    // iOS: without a shared session set to `playback`, the synthesiser obeys
+    // the ring/silent switch — so a muted phone reads replies silently, which
+    // looks like the Play button doing nothing. No effect on Android.
+    try {
+      await _tts.setSharedInstance(true);
+      await _tts.setIosAudioCategory(
+        IosTextToSpeechAudioCategory.playback,
+        [
+          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
+          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
+        ],
+      );
+    } catch (_) {
+      // Not iOS, or an older platform — the default session still speaks.
+    }
+
     await _tts.setLanguage('en-GB');
     await _selectBritishMaleVoice();
-    await _tts.setSpeechRate(0.5); // iOS default-ish; reliable + natural
+    // 0.5 is normal speed on BOTH platforms: iOS treats it as
+    // AVSpeechUtteranceDefaultSpeechRate, and the plugin doubles it on Android
+    // (1.0 there) precisely so this number means the same thing either side.
+    await _tts.setSpeechRate(0.5);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
+    // Without this the completion handler can fire immediately on Android,
+    // clearing the indicator while the voice is still reading — so the button
+    // says Play while it is still speaking.
+    await _tts.awaitSpeakCompletion(true);
     // Clear the speaking indicator whenever playback ends or is cancelled.
     _tts.setCompletionHandler(() => speakingKey.value = null);
     _tts.setCancelHandler(() => speakingKey.value = null);
