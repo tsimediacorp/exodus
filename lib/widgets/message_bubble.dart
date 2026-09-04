@@ -6,10 +6,14 @@ import '../models/chat_message.dart';
 import '../screens/reader_screen.dart';
 import '../services/bible_service.dart';
 import '../services/conversation_search.dart';
+import '../services/progress.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
+import '../services/follow_ups.dart';
+import 'arrival.dart';
 import 'drop_cap_text.dart';
 import 'exodus_shield.dart';
+import 'thinking_presence.dart';
 import 'scripture_link.dart';
 
 Uint8List? _decodeDataUrl(String dataUrl) {
@@ -52,6 +56,16 @@ class MessageBubble extends StatefulWidget {
   /// the search bar, or null if the selected match is in another message.
   final int? activeOccurrence;
 
+  /// True only for a reply that has just landed, so it settles onto the page
+  /// once. Scrolling back through a conversation must never replay it.
+  final bool arriving;
+
+  /// Narration for the waiting state, while EXODUS is still composing.
+  final ProgressController? progress;
+
+  /// Tapping one of EXODUS's suggested next questions.
+  final ValueChanged<String>? onFollowUp;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -60,6 +74,9 @@ class MessageBubble extends StatefulWidget {
     this.onDelete,
     this.searchQuery = '',
     this.activeOccurrence,
+    this.arriving = false,
+    this.progress,
+    this.onFollowUp,
   });
 
   @override
@@ -232,6 +249,12 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// instead of markdown: a markdown renderer owns its own spans, so there is
   /// nowhere to hang a highlight without rewriting its output. Leaving search
   /// restores the formatted reply.
+  /// The reply text as the couple should read it — never the raw content,
+  /// which may still carry the follow-up marker.
+  String get _visibleText => _isUser
+      ? widget.message.content
+      : FollowUps.strip(widget.message.content);
+
   Widget _content(TextStyle style) {
     final message = widget.message;
     // SelectableText handles its own taps for text selection, so a tap landing
@@ -240,7 +263,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     // Routing through its own onTap makes the whole message tappable.
     if (widget.searchQuery.isNotEmpty) {
       return SelectableText.rich(
-        TextSpan(children: _highlighted(message.content, style)),
+        TextSpan(children: _highlighted(_visibleText, style)),
         onTap: _toggleActions,
       );
     }
@@ -248,7 +271,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       return SelectableText(message.content,
           style: style, textAlign: TextAlign.right, onTap: _toggleActions);
     }
-    return _illuminated(message.content, style);
+    return _illuminated(_visibleText, style);
   }
 
   /// A reply, opened with an illuminated initial.
@@ -350,8 +373,10 @@ class _MessageBubbleState extends State<MessageBubble> {
     final hasText = message.content.trim().isNotEmpty;
     final waiting = !hasText && (message.isLoading || message.isStreaming);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Arrival(
+      // Only a reply that has just landed settles in. Replaying this while
+      // scrolling back through a long conversation would be unbearable.
+      enabled: widget.arriving,
       children: [
         // A rule, not just a label. In a reply this long the label alone
         // scrolls away and the turn loses its start; a hairline running to the
@@ -395,7 +420,8 @@ class _MessageBubbleState extends State<MessageBubble> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (waiting)
-                  _TypingIndicator(startTime: message.timestamp)
+                  ThinkingPresence(
+                      startTime: message.timestamp, progress: widget.progress)
                 else ...[
                   if (message.images.isNotEmpty)
                     _AttachedImages(
@@ -411,15 +437,63 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           ),
         ),
-        // Scripture EXODUS cited, as chips that open the in-app Bible at the
-        // passage. Chips rather than inline links because the reply is
-        // rendered as markdown, and rewriting its spans would fight the
-        // renderer.
+        // Scripture EXODUS cited, quoted where it stands.
         if (!message.isStreaming) _scriptureBlocks(),
-        // How long it took moved into the action row. Standing alone under
-        // every reply it read as debug output left switched on.
+        if (!message.isStreaming) _followUps(),
         if (_showActions && _canShowActions) _actionBar(),
       ],
+    );
+  }
+
+  /// The questions EXODUS offers next.
+  ///
+  /// This is the piece that makes it feel like EXODUS is leading rather than
+  /// waiting: instead of a blank composer after a heavy answer, there are two
+  /// or three things the couple might actually want to ask, in their own
+  /// words. Hidden while streaming — half a suggested question is worse than
+  /// none — and absent entirely when the model offered nothing.
+  Widget _followUps() {
+    final questions = FollowUps.parse(widget.message.content);
+    if (questions.isEmpty || widget.onFollowUp == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final question in questions)
+            Semantics(
+              button: true,
+              label: 'Ask: $question',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  widget.onFollowUp!(question);
+                },
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: ExodusTheme.covenantGlow
+                            .withValues(alpha: 0.32)),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(question,
+                      style: const TextStyle(
+                        color: ExodusTheme.covenantGlow,
+                        fontSize: 13,
+                        height: 1.3,
+                      )),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

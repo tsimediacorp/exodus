@@ -35,6 +35,15 @@ class AiService {
     List<String> images = const [],
     Duration idleTimeout = const Duration(seconds: 30),
     ProgressController? progress,
+
+    /// Appended to the system prompt for THIS call only.
+    ///
+    /// Counsel uses it to add the presence layer. It is a per-call argument
+    /// rather than part of MasterPrompt because the devotional, study, letter
+    /// and confession generators all build on the master prompt too, and an
+    /// instruction to ask how someone is feeling would be actively wrong in
+    /// the middle of generating a study exercise.
+    String systemExtra = '',
   }) async* {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -53,8 +62,8 @@ class AiService {
         'X-Title': 'EXODUS',
       },
     };
-    final body =
-        jsonEncode(_buildBody(userMessage, history, stream: true, images: images));
+    final body = jsonEncode(_buildBody(userMessage, history,
+        stream: true, images: images, systemExtra: systemExtra));
 
     // Resilient streaming: retry transient failures (dropped handshake, socket
     // close, mid-receive "Connection closed while receiving data", timeout) as
@@ -241,6 +250,7 @@ class AiService {
   Map<String, dynamic> _buildBody(
     String userMessage,
     List<ChatMessage> history, {
+    String systemExtra = '',
     required bool stream,
     List<String> images = const [],
     int? maxTokens,
@@ -260,7 +270,12 @@ class AiService {
           ];
 
     final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': MasterPrompt.build() + MemoryStore.instance.promptBlock()},
+      {
+        'role': 'system',
+        'content': MasterPrompt.build() +
+            MemoryStore.instance.promptBlock() +
+            systemExtra
+      },
       ...history
           .where((m) =>
               !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))

@@ -8,6 +8,7 @@ import '../models/check_in.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
 import '../services/check_in_service.dart';
+import '../config/presence_prompt.dart';
 import '../services/conversation_search.dart';
 import '../services/memory_service.dart';
 import '../services/progress.dart';
@@ -88,6 +89,13 @@ class ChatScreenState extends State<ChatScreen> {
   /// Whether the composer has anything to send. Tracked so the send button can
   /// go flat when there's nothing to do without rebuilding on every keystroke.
   bool _hasDraft = false;
+
+  /// The reply currently settling onto the page.
+  ///
+  /// Held by identity and cleared once the animation has run, so exactly one
+  /// bubble animates once. Without this, every rebuild — and every scroll that
+  /// rebuilds a bubble — would replay the entrance.
+  ChatMessage? _arriving;
 
   final List<String> _starters = const [
     'How do we lead our marriage spiritually as newlyweds?',
@@ -487,7 +495,11 @@ class ChatScreenState extends State<ChatScreen> {
               userMessage: prompt,
               history: history,
               images: images,
-              progress: _status)
+              progress: _status,
+              // Counsel only. The devotional, study and letter generators
+              // build on the same master prompt and each want a specific
+              // shape of output.
+              systemExtra: PresencePrompt.layer())
           .listen(
         (chunk) {
           setState(() {
@@ -539,6 +551,17 @@ class ChatScreenState extends State<ChatScreen> {
         replyMsg.content += '\n\n_(Stopped.)_';
       }
       _stopRequested = false;
+
+      // Let it settle onto the page, once. Cleared after the entrance so a
+      // later rebuild does not replay it.
+      if (mounted) {
+        setState(() => _arriving = replyMsg);
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          if (mounted && _arriving == replyMsg) {
+            setState(() => _arriving = null);
+          }
+        });
+      }
       setState(() {
         _sending = false;
         replyMsg.isStreaming = false;
@@ -1067,6 +1090,9 @@ class ChatScreenState extends State<ChatScreen> {
           message: msg,
           searchQuery: _searching ? _search.text.trim() : '',
           activeOccurrence: _searching ? _activeOccurrenceIn(i) : null,
+          arriving: identical(msg, _arriving),
+          progress: _status,
+          onFollowUp: _sending ? null : _send,
           onRegenerate: msg.sender == Sender.exodus && !_sending
               ? () => _regenerate(msg)
               : null,
