@@ -642,6 +642,7 @@ class ChatScreenState extends State<ChatScreen> {
           children: [
             // Clears the transparent bar the body now runs behind.
             const SizedBox(height: _barHeight),
+            if (!_storage.isAvailable) _storageWarning(),
             // Something EXODUS remembered and means to come back to. Sits
             // above the thread rather than interrupting it, and only when
             // nothing is being sent. Hidden while searching: it would shift
@@ -867,6 +868,41 @@ class ChatScreenState extends State<ChatScreen> {
             child: Text(label,
                 style: const TextStyle(
                     color: ExodusTheme.ironMist, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown when SharedPreferences could not be opened.
+  ///
+  /// Without it the app looks like it lost the couple's history while silently
+  /// discarding everything typed afterwards — every write in StorageService is
+  /// a no-op with no prefs instance. Saying so is the difference between a bug
+  /// they can report and one that just eats their conversations.
+  Widget _storageWarning() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ExodusTheme.midnight,
+        border: Border.all(color: ExodusTheme.crimson.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded,
+              size: 18, color: ExodusTheme.crimson),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'EXODUS cannot reach its storage on this device, so nothing you '
+              'write here will be saved. Restart the app; if it keeps '
+              'happening, reinstalling will fix it.',
+              style: TextStyle(
+                  color: ExodusTheme.porcelain, fontSize: 12, height: 1.5),
+            ),
           ),
         ],
       ),

@@ -24,7 +24,10 @@
     <application
         android:label="Exodus"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -52,6 +55,29 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- flutter_local_notifications ships a manifest with PERMISSIONS ONLY
+             and no receivers, so these have to be declared here. Without the
+             first, a scheduled devotional reminder never arrives at all: the
+             alarm fires and there is nothing registered to show it.
+
+             The second is why reminders stopped after an update.
+             MY_PACKAGE_REPLACED is the broadcast Android sends when an app is
+             upgraded, and BOOT_COMPLETED after a restart; both drop pending
+             alarms, so without this receiver every scheduled notification is
+             silently lost the moment a new build is installed. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

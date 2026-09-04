@@ -1,7 +1,28 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Real signing key, if one exists. android/key.properties is gitignored and
+// holds storeFile/storePassword/keyAlias/keyPassword.
+//
+// This matters far beyond the Play Store. Android identifies an app by its
+// SIGNATURE: an update only installs over an existing app when both are signed
+// by the same key. The debug key below is generated per-machine and is
+// regenerated whenever it is deleted or expires — the moment it changes, the
+// update is REFUSED, the only way forward is uninstall-and-reinstall, and that
+// takes every conversation, devotional and saved verse with it.
+//
+// A stable release key is therefore the fix for "updates wipe my history", not
+// merely a store requirement.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -29,12 +50,32 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Debug keys, so sideloaded test builds install and `flutter run
-            // --release` works. A Play Store upload needs a real keystore and
-            // an app bundle instead — see "Android builds" in the README.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed with the real key when android/key.properties is present,
+            // and only then does an update install over the previous build
+            // instead of demanding an uninstall that destroys the user's data.
+            //
+            // Falling back to the debug key keeps `flutter run --release` and
+            // sideloading working for anyone without the keystore — but any
+            // build made that way is disposable, because its signature is not
+            // guaranteed to match the last one.
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

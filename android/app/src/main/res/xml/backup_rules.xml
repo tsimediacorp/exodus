@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 and below (android:fullBackupContent).
+
+  Conversations, devotionals, study exercises, saved verses and journey
+  progress all live in SharedPreferences, so backing that up is what lets a
+  reinstall come back with the couple's history intact.
+
+  Confessions are deliberately EXCLUDED. They are meant to stay on the device
+  that made them; syncing them to a Google account backup would quietly move
+  them somewhere the person confessing never agreed to put them.
+-->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <exclude domain="sharedpref" path="exodus.confessions.xml" />
+</full-backup-content>

@@ -56,13 +56,35 @@ class StorageService {
   // conversations or memory — see ConfessionService for why that matters.
   static const _kConfessions       = 'exodus.confessions';
 
+  /// Why storage could not be opened, or null when it is working.
+  ///
+  /// This matters because every write in this class is `_prefs?.setX(...)`:
+  /// with no prefs instance those calls are silent no-ops and every read comes
+  /// back empty. The app would look exactly as though its history had been
+  /// wiped, while cheerfully discarding everything written afterwards. Better
+  /// to be able to say so than to pretend.
+  String? initError;
+
+  bool get isAvailable => _prefs != null;
+
   Future<void> init() async {
-    try {
-      _prefs = await SharedPreferences.getInstance();
-    } catch (_) {
-      _prefs = null;
-      return;
+    // Retry once. SharedPreferences can fail transiently on Android while the
+    // platform channel is still coming up, and giving up on the first attempt
+    // costs the user everything they write for the rest of the session.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        _prefs = await SharedPreferences.getInstance();
+        initError = null;
+        break;
+      } catch (e) {
+        _prefs = null;
+        initError = '$e';
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 250));
+        }
+      }
     }
+    if (_prefs == null) return;
 
     final p = _prefs;
     if (p == null) return;

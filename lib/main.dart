@@ -47,6 +47,11 @@ Future<void> main() async {
 
     try {
       await NotificationService.instance.init();
+      // Android 13+ will not deliver anything without a granted runtime
+      // permission, and it was only ever requested from inside the Devotional
+      // tab — so a couple who never opened that tab silently got no reminders
+      // at all. Asking here costs one prompt on first launch.
+      await NotificationService.instance.requestPermission();
       // Re-arm the recurring daily devotional reminder on every launch, as long
       // as the user has set a devotional goal — so it keeps firing daily even
       // if they don't open the Devotional tab.
