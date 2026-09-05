@@ -16,27 +16,25 @@ void main() {
       content: text, sender: Sender.exodus, isStreaming: streaming);
 
   group('the follow-up marker never reaches the reader', () {
-    testWidgets('it is stripped from the rendered reply', (tester) async {
+    // The model is no longer ASKED for follow-up questions — EXODUS raises
+    // things itself, by notification, rather than offering a menu of buttons.
+    // The stripping stays as a guard: a model that emits the old marker from
+    // habit must never have it land in a reply.
+    testWidgets('a stray marker is still stripped', (tester) async {
       await tester.pumpWidget(host(MessageBubble(
         message: exodus('Sit with that.\n\n[[NEXT: How do we start?]]'),
-        onFollowUp: (_) {},
       )));
-      // Not as a whole, and not as fragments either.
       expect(find.textContaining('[[NEXT'), findsNothing);
       expect(find.textContaining(']]'), findsNothing);
     });
 
-    testWidgets('the questions become tappable chips', (tester) async {
-      String? asked;
+    testWidgets('no buttons are offered', (tester) async {
+      // The whole point of the change: nothing here is user-initiated.
       await tester.pumpWidget(host(MessageBubble(
-        message: exodus('Sit with that.\n\n[[NEXT: How do we start? | What if she refuses?]]'),
-        onFollowUp: (q) => asked = q,
+        message: exodus('Sit with that.\n\n[[NEXT: a | b]]'),
       )));
-      expect(find.text('How do we start?'), findsOneWidget);
-      expect(find.text('What if she refuses?'), findsOneWidget);
-
-      await tester.tap(find.text('How do we start?'));
-      expect(asked, 'How do we start?');
+      expect(find.text('a'), findsNothing);
+      expect(find.text('b'), findsNothing);
     });
 
     testWidgets('a half-written marker does not flash up mid-stream',
@@ -46,14 +44,6 @@ void main() {
       )));
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.textContaining('[[NEXT'), findsNothing);
-    });
-
-    testWidgets('no chips when the model offered none', (tester) async {
-      await tester.pumpWidget(host(MessageBubble(
-        message: exodus('Sit with that.'),
-        onFollowUp: (_) {},
-      )));
-      expect(find.byType(Wrap), findsNothing);
     });
   });
 

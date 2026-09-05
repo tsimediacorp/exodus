@@ -51,7 +51,11 @@ Future<void> main() async {
       // permission, and it was only ever requested from inside the Devotional
       // tab — so a couple who never opened that tab silently got no reminders
       // at all. Asking here costs one prompt on first launch.
-      final allowed = await NotificationService.instance.requestPermission();
+      // Permission is NOT requested here any more. Android grants exactly one
+      // system dialog, and spending it before the couple knows what EXODUS
+      // would send permanently disables follow-ups on a reflexive "no".
+      // HomeShell explains first, then asks — see NotificationPrimer.
+      final allowed = await NotificationService.instance.areEnabled() ?? false;
       // Re-arm the recurring reminder on every launch whenever notifications
       // are permitted. This used to be gated on the couple having set a
       // devotional goal, which meant anyone who never finished that flow had

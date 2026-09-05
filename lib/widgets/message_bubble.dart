@@ -63,9 +63,6 @@ class MessageBubble extends StatefulWidget {
   /// Narration for the waiting state, while EXODUS is still composing.
   final ProgressController? progress;
 
-  /// Tapping one of EXODUS's suggested next questions.
-  final ValueChanged<String>? onFollowUp;
-
   const MessageBubble({
     super.key,
     required this.message,
@@ -76,7 +73,6 @@ class MessageBubble extends StatefulWidget {
     this.activeOccurrence,
     this.arriving = false,
     this.progress,
-    this.onFollowUp,
   });
 
   @override
@@ -439,61 +435,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
         // Scripture EXODUS cited, quoted where it stands.
         if (!message.isStreaming) _scriptureBlocks(),
-        if (!message.isStreaming) _followUps(),
         if (_showActions && _canShowActions) _actionBar(),
       ],
-    );
-  }
-
-  /// The questions EXODUS offers next.
-  ///
-  /// This is the piece that makes it feel like EXODUS is leading rather than
-  /// waiting: instead of a blank composer after a heavy answer, there are two
-  /// or three things the couple might actually want to ask, in their own
-  /// words. Hidden while streaming — half a suggested question is worse than
-  /// none — and absent entirely when the model offered nothing.
-  Widget _followUps() {
-    final questions = FollowUps.parse(widget.message.content);
-    if (questions.isEmpty || widget.onFollowUp == null) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 18),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final question in questions)
-            Semantics(
-              button: true,
-              label: 'Ask: $question',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  widget.onFollowUp!(question);
-                },
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 36),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                        color: ExodusTheme.covenantGlow
-                            .withValues(alpha: 0.32)),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Text(question,
-                      style: const TextStyle(
-                        color: ExodusTheme.covenantGlow,
-                        fontSize: 13,
-                        height: 1.3,
-                      )),
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 

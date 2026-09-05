@@ -6,21 +6,15 @@ import '../widgets/page_backdrop.dart';
 
 /// Everything EXODUS can do, in one place.
 ///
-/// The modes have always existed but only ever from the drawer, which meant
-/// they were invisible unless you went looking. This is the same set of
-/// destinations laid out to be browsed — the drawer keeps working exactly as
-/// it did, and both routes select the same live screen.
+/// The modes used to live only in the drawer, which meant they were invisible
+/// unless you went looking for them. This is now the only way in, and the one
+/// place that says what each mode is FOR — a grid of unexplained icons is a
+/// menu, not an invitation.
 class ExploreScreen extends StatelessWidget {
-  final VoidCallback? onOpenMenu;
-
   /// Selects a mode by its index in the shell's stack.
   final ValueChanged<int> onOpenMode;
 
-  const ExploreScreen({
-    super.key,
-    this.onOpenMenu,
-    required this.onOpenMode,
-  });
+  const ExploreScreen({super.key, required this.onOpenMode});
 
   /// Mode index, icon, name, and the one line that says what it is FOR — a
   /// grid of unexplained icons is a menu, not an invitation.

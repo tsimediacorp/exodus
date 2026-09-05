@@ -1103,7 +1103,6 @@ class ChatScreenState extends State<ChatScreen> {
           activeOccurrence: _searching ? _activeOccurrenceIn(i) : null,
           arriving: identical(msg, _arriving),
           progress: _status,
-          onFollowUp: _sending ? null : _send,
           onRegenerate: msg.sender == Sender.exodus && !_sending
               ? () => _regenerate(msg)
               : null,

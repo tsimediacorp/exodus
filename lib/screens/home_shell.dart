@@ -1,31 +1,32 @@
 import 'package:flutter/material.dart';
 import '../services/notification_service.dart';
-import '../services/storage_service.dart';
-import '../widgets/app_drawer.dart';
 import '../widgets/exodus_bottom_nav.dart';
+import '../widgets/notification_primer.dart';
 import 'chat_screen.dart';
+import 'conversations_screen.dart';
 import 'coaching_screen.dart';
 import 'confessional_screen.dart';
 import 'devotional_screen.dart';
 import 'explore_screen.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
-import 'memory_screen.dart';
 import 'profile_screen.dart';
 import 'study_screen.dart';
 import 'together_screen.dart';
 
 /// Root navigation after the splash.
 ///
-/// Two ways in, one set of screens. The bottom bar carries the four places you
-/// return to — Home, Explore, Library, Profile — while the drawer still
-/// switches the six modes exactly as it always did. Both select entries in the
-/// SAME IndexedStack, so a mode opened from the drawer and one opened from
-/// Explore are the same live screen with the same state, not two copies.
+/// One way in. The bottom bar carries the four places you return to — Home,
+/// Explore, Library, Profile — and everything the drawer used to hold now has
+/// a place in them: the modes are Explore, the library links are Library,
+/// Settings is Profile, and the conversation list is Home plus its "See all".
 ///
-/// The stack is ordered tabs-then-modes and the two index spaces are kept
-/// separate on purpose: [_modeBase] is the only place that relationship is
-/// written down, and AppDrawer's mode list is indexed from zero independently.
+/// The drawer is gone deliberately. It was a second, parallel navigation for
+/// the same destinations, and two routes to one screen is how a mode ends up
+/// reachable but undiscoverable.
+///
+/// The stack is ordered tabs-then-modes: [_modeBase] is the only place that
+/// relationship is written down.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -42,7 +43,7 @@ class _HomeShellState extends State<HomeShell> {
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
   /// Where the drawer's modes begin in the stack. Mode N lives at
-  /// _modeBase + N, matching AppDrawer's own list order.
+  /// _modeBase + N, matching the order ExploreScreen lists them in.
   static const int _modeBase = 4;
 
   static const int _counselMode = 0;
@@ -62,6 +63,12 @@ class _HomeShellState extends State<HomeShell> {
         .addListener(_onOpenDevotional);
     NotificationService.instance.openCheckInRequested
         .addListener(_onOpenCheckIn);
+    // Ask once the app is actually on screen, with a reason, rather than
+    // firing the one system dialog Android allows before the couple has seen
+    // anything.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) NotificationPrimer.maybeShow(context);
+    });
   }
 
   @override
@@ -95,7 +102,23 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  void _openMenu() => _scaffoldKey.currentState?.openDrawer();
+  /// The shield in a mode's app bar returns to Home. With no drawer there is
+  /// nothing to open, and a mode you cannot leave except with the system back
+  /// gesture is a dead end.
+  void _goHome() => _goToTab(ExodusBottomNav.home);
+
+  void _openConversationsList() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ConversationsScreen(
+        onOpen: _openConversation,
+        onNew: _newConversation,
+        onDelete: (id) {
+          _chatKey.currentState?.deleteConversationById(id);
+          setState(() {});
+        },
+      ),
+    ));
+  }
 
   void _goToMode(int mode) => setState(() => _index = _modeBase + mode);
 
@@ -119,25 +142,6 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      // Refresh the drawer's chat list / current-highlight each time it opens.
-      onDrawerChanged: (isOpen) {
-        if (isOpen) setState(() {});
-      },
-      drawer: AppDrawer(
-        currentMode: _index >= _modeBase ? _index - _modeBase : -1,
-        onSelectMode: _goToMode,
-        conversations: StorageService.instance.loadConversations(),
-        currentConversationId: _chatKey.currentState?.currentId,
-        onNewConversation: _newConversation,
-        onSelectConversation: _openConversation,
-        onDeleteConversation: (id) {
-          _chatKey.currentState?.deleteConversationById(id);
-          setState(() {});
-        },
-        onOpenMemory: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const MemoryScreen()),
-        ),
-      ),
       bottomNavigationBar: ExodusBottomNav(
         selected: _selectedTab,
         onSelect: _goToTab,
@@ -149,24 +153,24 @@ class _HomeShellState extends State<HomeShell> {
           // ---- Tabs 0..3 ----
           HomeScreen(
             key: _homeKey,
-            onOpenMenu: _openMenu,
+            onOpenMenu: _goHome,
             onOpenConversation: _openConversation,
             onNewConversation: _newConversation,
-            onSeeAll: _openMenu,
+            onSeeAll: _openConversationsList,
           ),
-          ExploreScreen(onOpenMenu: _openMenu, onOpenMode: _goToMode),
+          ExploreScreen(onOpenMode: _goToMode),
           const LibraryScreen(),
           ProfileScreen(onOpenTogether: () => _goToMode(_togetherMode)),
 
-          // ---- Modes, from _modeBase. Order must match AppDrawer._modes. ----
-          ChatScreen(key: _chatKey, onOpenMenu: _openMenu),
-          CoachingScreen(onOpenMenu: _openMenu),
-          DevotionalScreen(onOpenMenu: _openMenu),
+          // ---- Modes, from _modeBase. Order must match ExploreScreen. ----
+          ChatScreen(key: _chatKey, onOpenMenu: _goHome),
+          CoachingScreen(onOpenMenu: _goHome),
+          DevotionalScreen(onOpenMenu: _goHome),
           StudyScreen(
-              onOpenMenu: _openMenu,
+              onOpenMenu: _goHome,
               isActive: _index == _modeBase + 3),
-          ConfessionalScreen(onOpenMenu: _openMenu),
-          TogetherScreen(onOpenMenu: _openMenu),
+          ConfessionalScreen(onOpenMenu: _goHome),
+          TogetherScreen(onOpenMenu: _goHome),
         ],
       ),
     );

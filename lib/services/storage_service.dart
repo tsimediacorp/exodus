@@ -44,6 +44,7 @@ class StorageService {
   static const _kReaderFontSize    = 'exodus.reader.fontSize';
   static const _kBiblePaged        = 'exodus.bible.pagedMode';
   static const _kBibleTranslation  = 'exodus.bible.translation';
+  static const _kNotifPrimerShown  = 'exodus.notifications.primerShown';
   static const _kJourneys          = 'exodus.journeys.progress';
   static const _kActionDays        = 'exodus.devotional.actionDays';
   static const _kSavedVerses       = 'exodus.verses.saved';
@@ -428,6 +429,20 @@ class StorageService {
     all.sort((a, b) => b.day.compareTo(a.day));
     await _prefs?.setString(
         _kDevotionals, jsonEncode(all.map((d) => d.toJson()).toList()));
+  }
+
+  // ---------------- Notifications ----------------
+
+  /// Whether the couple has been asked about notifications.
+  ///
+  /// Android allows the system dialog ONCE, so the in-app explanation is shown
+  /// once too — asking again after a decline is nagging, and Settings already
+  /// has the way back.
+  bool get notificationPrimerShown =>
+      _prefs?.getBool(_kNotifPrimerShown) ?? false;
+
+  Future<void> setNotificationPrimerShown(bool shown) async {
+    await _prefs?.setBool(_kNotifPrimerShown, shown);
   }
 
   // ---------------- Bible translation ----------------
