@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../models/check_in.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
@@ -19,6 +20,27 @@ class NotificationService {
   /// Flipped true when a devotional notification is tapped; HomeShell watches
   /// this to switch to the Devotional tab.
   final ValueNotifier<bool> openDevotionalRequested = ValueNotifier(false);
+
+  /// Set to a check-in id when its notification is tapped, so the shell can
+  /// open Counsel on that specific follow-up.
+  final ValueNotifier<String?> openCheckInRequested = ValueNotifier(null);
+
+  /// Payload prefixes. Every notification must carry one: without a payload
+  /// there is no way to tell what was tapped, and this used to send EVERY tap
+  /// to the Devotional tab — including, once check-ins started arriving, taps
+  /// on a follow-up about something else entirely.
+  static const String _devotionalPayload = 'devotional';
+  static const String _checkInPayload = 'checkin:';
+
+  void _route(String? payload) {
+    if (payload == null || payload == _devotionalPayload) {
+      openDevotionalRequested.value = true;
+      return;
+    }
+    if (payload.startsWith(_checkInPayload)) {
+      openCheckInRequested.value = payload.substring(_checkInPayload.length);
+    }
+  }
 
   Future<void> init() async {
     if (_ready) return;
@@ -41,8 +63,8 @@ class NotificationService {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     await _plugin.initialize(
       const InitializationSettings(iOS: ios, android: android),
-      onDidReceiveNotificationResponse: (_) =>
-          openDevotionalRequested.value = true,
+      onDidReceiveNotificationResponse: (response) =>
+          _route(response.payload),
     );
     _ready = true;
   }
@@ -80,6 +102,7 @@ class NotificationService {
       'Your daily devotional',
       "Today's devotional is ready — open EXODUS to read it together.",
       first,
+      payload: _devotionalPayload,
       const NotificationDetails(
         iOS: DarwinNotificationDetails(),
         android: AndroidNotificationDetails(
@@ -100,6 +123,57 @@ class NotificationService {
 
   /// Cancel the recurring daily devotional reminder.
   Future<void> cancelDailyDevotional() => _plugin.cancel(_dailyId);
+
+  // ---------------- Check-ins ----------------
+
+  /// The hour a follow-up arrives. Evening on purpose: a check-in asks a
+  /// couple to talk about something that matters, and lunchtime at work is the
+  /// wrong moment to be asked whether you have forgiven your husband.
+  static const int checkInHour = 18;
+
+  /// A stable notification id for [checkInId].
+  ///
+  /// Derived from the id rather than stored on the model, which keeps this out
+  /// of the persisted schema. Two check-ins could in principle collide in the
+  /// 10k range; the consequence is that one replaces the other's notification
+  /// rather than anything being lost, which is an acceptable trade for not
+  /// migrating stored data.
+  static int _checkInNotificationId(String checkInId) =>
+      20000 + (checkInId.hashCode.abs() % 10000);
+
+  /// EXODUS reaching out first.
+  ///
+  /// This is what turns a check-in from something the couple has to open the
+  /// app to discover into something that actually follows up. Scheduled for
+  /// the evening of the day it comes due; a check-in already past due is
+  /// raised this evening, or tomorrow evening if that has gone.
+  Future<void> scheduleCheckIn(CheckIn checkIn) async {
+    if (!_ready) return;
+    final now = tz.TZDateTime.now(tz.local);
+    var when = tz.TZDateTime(tz.local, checkIn.dueAt.year, checkIn.dueAt.month,
+        checkIn.dueAt.day, checkInHour);
+    while (!when.isAfter(now)) {
+      when = when.add(const Duration(days: 1));
+    }
+
+    await _plugin.zonedSchedule(
+      _checkInNotificationId(checkIn.id),
+      'EXODUS remembered',
+      checkIn.question,
+      when,
+      _details,
+      payload: '$_checkInPayload${checkIn.id}',
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+  }
+
+  /// Drop a scheduled follow-up — answered, dismissed, or superseded. A
+  /// notification about something the couple has already dealt with is worse
+  /// than none.
+  Future<void> cancelCheckIn(String checkInId) =>
+      _plugin.cancel(_checkInNotificationId(checkInId));
 
   // ---------------- Diagnostics ----------------
   //

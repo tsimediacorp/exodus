@@ -60,12 +60,16 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     NotificationService.instance.openDevotionalRequested
         .addListener(_onOpenDevotional);
+    NotificationService.instance.openCheckInRequested
+        .addListener(_onOpenCheckIn);
   }
 
   @override
   void dispose() {
     NotificationService.instance.openDevotionalRequested
         .removeListener(_onOpenDevotional);
+    NotificationService.instance.openCheckInRequested
+        .removeListener(_onOpenCheckIn);
     super.dispose();
   }
 
@@ -74,6 +78,21 @@ class _HomeShellState extends State<HomeShell> {
       setState(() => _index = _modeBase + _devotionalMode);
       NotificationService.instance.openDevotionalRequested.value = false;
     }
+  }
+
+  /// EXODUS followed up and the couple tapped it: go straight into Counsel on
+  /// that specific thing, rather than dropping them on a home screen to hunt
+  /// for what the notification meant.
+  void _onOpenCheckIn() {
+    final id = NotificationService.instance.openCheckInRequested.value;
+    if (id == null || !mounted) return;
+    NotificationService.instance.openCheckInRequested.value = null;
+    setState(() => _index = _counselIndex);
+    // After the frame, so ChatScreen exists in the stack before it is asked
+    // to open anything.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _chatKey.currentState?.openCheckInById(id);
+    });
   }
 
   void _openMenu() => _scaffoldKey.currentState?.openDrawer();

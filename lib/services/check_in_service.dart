@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../config/check_in_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/check_in.dart';
+import 'notification_service.dart';
 import 'ai_service.dart';
 import 'memory_store.dart';
 import 'progress.dart';
@@ -82,6 +83,9 @@ class CheckInService extends ChangeNotifier {
     c.status = CheckInStatus.answered;
     c.resolvedAt = DateTime.now();
     await _storage.saveCheckIn(c);
+    // Being asked about something you have just talked through is worse than
+    // not being asked at all.
+    await _cancelNotification(c.id);
     notifyListeners();
   }
 
@@ -89,7 +93,14 @@ class CheckInService extends ChangeNotifier {
     c.status = CheckInStatus.dismissed;
     c.resolvedAt = DateTime.now();
     await _storage.saveCheckIn(c);
+    await _cancelNotification(c.id);
     notifyListeners();
+  }
+
+  Future<void> _cancelNotification(String id) async {
+    try {
+      await NotificationService.instance.cancelCheckIn(id);
+    } catch (_) {/* best-effort */}
   }
 
   /// Push a check-in out by [days] — "not now" without discarding it.
@@ -104,6 +115,12 @@ class CheckInService extends ChangeNotifier {
       status: CheckInStatus.pending,
     );
     await _storage.saveCheckIn(moved);
+    // "Not now" has to move the notification too, or the old one fires on the
+    // original date and asks again anyway.
+    await _cancelNotification(c.id);
+    try {
+      await NotificationService.instance.scheduleCheckIn(moved);
+    } catch (_) {/* best-effort */}
     notifyListeners();
   }
 
@@ -236,6 +253,13 @@ class CheckInService extends ChangeNotifier {
       if (!seen.add(candidate.fingerprint)) continue; // duplicate
 
       await _storage.saveCheckIn(candidate);
+      // EXODUS reaches out on its own. Without this a check-in only ever
+      // appears to someone who happens to open Counsel, which is the opposite
+      // of following up. Best-effort: a scheduling failure must not lose the
+      // check-in itself, which still shows in-app.
+      try {
+        await NotificationService.instance.scheduleCheckIn(candidate);
+      } catch (_) {/* notifications are a nicety; the card still appears */}
       added++;
     }
 

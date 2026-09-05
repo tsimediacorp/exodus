@@ -944,6 +944,17 @@ class ChatScreenState extends State<ChatScreen> {
 
   /// Take a check-in into a fresh conversation, seeded so EXODUS opens by
   /// naming what it remembered rather than waiting to be prompted.
+  /// Open a specific check-in, by id, from a notification tap.
+  ///
+  /// Silently does nothing if it has since been answered or dismissed — a
+  /// notification can sit in the shade for hours, and re-raising something the
+  /// couple already dealt with is worse than the tap doing nothing.
+  Future<void> openCheckInById(String id) async {
+    final match = CheckInService.instance.all.where((c) => c.id == id);
+    if (match.isEmpty || !match.first.isOpen) return;
+    await _openCheckIn(match.first);
+  }
+
   Future<void> _openCheckIn(CheckIn checkIn) async {
     await CheckInService.instance.markAnswered(checkIn);
     if (!mounted) return;
