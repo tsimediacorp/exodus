@@ -101,6 +101,77 @@ class NotificationService {
   /// Cancel the recurring daily devotional reminder.
   Future<void> cancelDailyDevotional() => _plugin.cancel(_dailyId);
 
+  // ---------------- Diagnostics ----------------
+  //
+  // Notifications have now been "fixed" twice without either of us being able
+  // to see whether anything actually changed — the only feedback loop was
+  // waiting until seven the next morning. These make each step of the chain
+  // observable, because the failure could be permission, scheduling, the
+  // receivers, the timezone, or nothing having been scheduled at all.
+
+  /// The timezone the scheduler is actually using. UTC here means
+  /// [FlutterTimezone] failed and a 7am reminder will fire at the wrong hour.
+  String get timezoneName => tz.local.name;
+
+  /// Whether the OS will show our notifications at all. False means the user
+  /// denied the permission or switched the app's notifications off in
+  /// settings, and nothing this class does can succeed.
+  Future<bool?> areEnabled() async {
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android != null) return android.areNotificationsEnabled();
+    final ios = _plugin.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    if (ios != null) return true; // iOS reports through the permission request
+    return null;
+  }
+
+  /// Everything currently scheduled. An empty list when a reminder is expected
+  /// is the single most useful fact: it means nothing was ever scheduled,
+  /// rather than scheduled and swallowed.
+  Future<List<PendingNotificationRequest>> pending() =>
+      _plugin.pendingNotificationRequests();
+
+  static const NotificationDetails _details = NotificationDetails(
+    iOS: DarwinNotificationDetails(),
+    android: AndroidNotificationDetails(
+      'devotional',
+      'Daily Devotional',
+      channelDescription: 'Your morning devotional from EXODUS',
+      importance: Importance.high,
+      priority: Priority.high,
+    ),
+  );
+
+  /// Post immediately. Proves permission, the channel and delivery — but NOT
+  /// scheduling, which is the part that has been failing.
+  Future<void> showNow() => _plugin.show(
+        9001,
+        'EXODUS is working',
+        'If you can see this, notifications are permitted on this device.',
+        _details,
+      );
+
+  /// Schedule one a minute out. This is the real test: it exercises the alarm
+  /// and the receivers declared in the manifest, which is exactly where a
+  /// scheduled notification was being lost.
+  Future<tz.TZDateTime> scheduleTestSoon(
+      {Duration delay = const Duration(minutes: 1)}) async {
+    final when = tz.TZDateTime.now(tz.local).add(delay);
+    await _plugin.zonedSchedule(
+      9002,
+      'EXODUS reminder test',
+      'Scheduled notifications are working. Your devotional reminder will '
+          'arrive like this.',
+      when,
+      _details,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+    return when;
+  }
+
   /// Schedule a one-shot morning notification for [day] at [hour]:00 local.
   /// Using TZDateTime.from on a local wall-clock DateTime fires at the correct
   /// absolute instant regardless of the configured tz database default.

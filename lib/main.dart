@@ -51,11 +51,15 @@ Future<void> main() async {
       // permission, and it was only ever requested from inside the Devotional
       // tab — so a couple who never opened that tab silently got no reminders
       // at all. Asking here costs one prompt on first launch.
-      await NotificationService.instance.requestPermission();
-      // Re-arm the recurring daily devotional reminder on every launch, as long
-      // as the user has set a devotional goal — so it keeps firing daily even
-      // if they don't open the Devotional tab.
-      if (StorageService.instance.loadDevotionalGoal() != null) {
+      final allowed = await NotificationService.instance.requestPermission();
+      // Re-arm the recurring reminder on every launch whenever notifications
+      // are permitted. This used to be gated on the couple having set a
+      // devotional goal, which meant anyone who never finished that flow had
+      // nothing scheduled at all — no reminder existed to be delivered, and
+      // every fix to the delivery path was beside the point. The devotional
+      // always has content to open, canned or generated, so there is nothing
+      // to wait for.
+      if (allowed) {
         await NotificationService.instance.scheduleDailyDevotional();
       }
     } catch (_) {

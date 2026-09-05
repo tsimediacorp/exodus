@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../config/master_prompt.dart';
 import '../services/check_in_service.dart';
 import '../services/storage_service.dart';
+import '../services/notification_service.dart';
 import '../theme/exodus_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -124,9 +125,156 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _checkInToggle(),
             const SizedBox(height: 8),
             _forceScanTile(),
+            const SizedBox(height: 28),
+            _sectionHeader('NOTIFICATIONS'),
+            _notificationDiagnostics(),
           ],
         ),
       ),
+    );
+  }
+
+  /// Notification diagnostics.
+  ///
+  /// This exists because "notifications don't work" has been reported three
+  /// times and neither of us could see WHERE the chain broke — the only
+  /// feedback loop was waiting until seven the next morning. Permission,
+  /// delivery, scheduling, the timezone and whether anything was ever queued
+  /// are five different failures with five different fixes, so each one is
+  /// shown separately and two of them can be tested in under a minute.
+  Widget _notificationDiagnostics() {
+    final service = NotificationService.instance;
+    return FutureBuilder<List<Object?>>(
+      future: Future.wait([service.areEnabled(), service.pending()]),
+      builder: (context, snapshot) {
+        final enabled = snapshot.data?[0] as bool?;
+        final pending =
+            (snapshot.data?[1] as List?)?.cast<dynamic>() ?? const [];
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: ExodusTheme.midnight,
+            border: Border.all(color: ExodusTheme.steel),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _diagRow(
+                'Permitted by this phone',
+                enabled == null
+                    ? 'checking…'
+                    : (enabled ? 'yes' : 'NO — turn EXODUS on in Android settings'),
+                ok: enabled == true,
+              ),
+              _diagRow('Scheduler timezone', service.timezoneName,
+                  // UTC means the device timezone lookup failed, and a 7am
+                  // reminder would fire at the wrong hour entirely.
+                  ok: service.timezoneName != 'UTC'),
+              _diagRow(
+                'Reminders queued',
+                snapshot.hasData ? '${pending.length}' : 'checking…',
+                ok: pending.isNotEmpty,
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Send one now to test permission and delivery. Schedule one to '
+                'test the part that actually failed — the alarm and its '
+                'receiver.',
+                style: TextStyle(
+                    color: ExodusTheme.ironMist, fontSize: 12, height: 1.45),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        await service.showNow();
+                        if (context.mounted) _toast(context, 'Sent now.');
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: ExodusTheme.steel),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                      child: const Text('Send now',
+                          style: TextStyle(color: ExodusTheme.porcelain)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        await service.scheduleTestSoon();
+                        if (context.mounted) {
+                          _toast(context,
+                              'Scheduled — close the app and wait one minute.');
+                          setState(() {}); // refresh the queued count
+                        }
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: ExodusTheme.covenantBlue,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                      child: const Text('Test in 1 min',
+                          style: TextStyle(color: ExodusTheme.porcelain)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () async {
+                  await service.requestPermission();
+                  await service.scheduleDailyDevotional();
+                  if (context.mounted) {
+                    _toast(context, 'Daily reminder re-armed for 7am.');
+                    setState(() {});
+                  }
+                },
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                child: const Text('Re-arm the 7am daily reminder',
+                    style:
+                        TextStyle(color: ExodusTheme.covenantGlow, fontSize: 13)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _diagRow(String label, String value, {required bool ok}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+              size: 15, color: ok ? ExodusTheme.brass : ExodusTheme.crimson),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    color: ExodusTheme.ironMist, fontSize: 13)),
+          ),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                    color: ok ? ExodusTheme.porcelain : ExodusTheme.crimson,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toast(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 
