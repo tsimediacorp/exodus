@@ -4,9 +4,14 @@ import 'package:exodus/models/chat_message.dart';
 import 'package:exodus/theme/exodus_theme.dart';
 import 'package:exodus/widgets/arrival.dart';
 import 'package:exodus/widgets/message_bubble.dart';
+import 'package:exodus/services/bible_service.dart';
+import 'package:exodus/widgets/scripture_hero_card.dart';
 import 'package:exodus/widgets/thinking_presence.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async => BibleService.instance.load());
+
   Widget host(Widget child) => MaterialApp(
         theme: ExodusTheme.build(),
         home: Scaffold(body: SingleChildScrollView(child: child)),
@@ -102,6 +107,65 @@ void main() {
           .toList();
       expect(o.first, greaterThan(o.last),
           reason: 'the first child should be ahead of the second');
+    });
+  });
+
+  group('the anchor passage', () {
+    testWidgets('a marked verse gets its own card', (tester) async {
+      await tester.pumpWidget(host(MessageBubble(
+        message: exodus(
+            'Cast it on Him — 1 Peter 5:7.\n\n[[KEY: 1 Peter 5:7]]'),
+      )));
+      await tester.pump();
+      expect(find.byType(ScriptureHeroCard), findsOneWidget);
+      expect(find.text('SCRIPTURE FOR YOU'), findsOneWidget);
+      // The marker itself never shows.
+      expect(find.textContaining('[[KEY'), findsNothing);
+    });
+
+    testWidgets('a reply with no anchor gets no card', (tester) async {
+      // A card on every reply would make the card mean nothing.
+      await tester.pumpWidget(host(MessageBubble(
+        message: exodus('Pray at whatever time you both can manage.'),
+      )));
+      await tester.pump();
+      expect(find.byType(ScriptureHeroCard), findsNothing);
+    });
+
+    testWidgets('a marker for a verse the reply never cited gets no card',
+        (tester) async {
+      // BibleService.parse is lenient by design — "Hesitations 4:12" resolves
+      // to Song of Solomon 4:12 — so a hallucinated marker could otherwise
+      // produce a confident card for a passage EXODUS never mentioned.
+      await tester.pumpWidget(host(MessageBubble(
+        message: exodus('Pray together tonight.\n\n[[KEY: Hesitations 4:12]]'),
+      )));
+      await tester.pump();
+      expect(find.byType(ScriptureHeroCard), findsNothing);
+      expect(find.textContaining('[[KEY'), findsNothing);
+    });
+
+    testWidgets('the anchor is not repeated among the minor citations',
+        (tester) async {
+      await tester.pumpWidget(host(MessageBubble(
+        message: exodus(
+            'See 1 Peter 5:7 and Psalm 23:1.\n\n[[KEY: 1 Peter 5:7]]'),
+      )));
+      await tester.pump();
+      // The anchor appears once, on the card; the other stays a citation.
+      expect(find.text('1 PETER 5:7'), findsOneWidget);
+      // The canon name is "Psalms"; the label uses it, not the prose spelling.
+      expect(find.text('PSALMS 23:1'), findsOneWidget);
+    });
+
+    testWidgets('nothing is shown while the reply is still streaming',
+        (tester) async {
+      await tester.pumpWidget(host(MessageBubble(
+        message: exodus('Cast it on Him.\n\n[[KEY: 1 Peter 5:7]]',
+            streaming: true),
+      )));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byType(ScriptureHeroCard), findsNothing);
     });
   });
 }

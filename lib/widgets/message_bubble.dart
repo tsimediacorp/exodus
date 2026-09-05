@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import '../models/bible_ref.dart';
 import '../models/chat_message.dart';
 import '../screens/reader_screen.dart';
 import '../services/bible_service.dart';
@@ -10,10 +11,12 @@ import '../services/progress.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../services/follow_ups.dart';
+import '../services/key_scripture.dart';
 import 'arrival.dart';
 import 'drop_cap_text.dart';
 import 'exodus_shield.dart';
 import 'thinking_presence.dart';
+import 'scripture_hero_card.dart';
 import 'scripture_link.dart';
 
 Uint8List? _decodeDataUrl(String dataUrl) {
@@ -100,9 +103,15 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// the couple to tap away to find out what it says. Still tappable, and still
   /// opens the in-app Bible at the passage.
   Widget _scriptureBlocks() {
-    final refs = BibleService.instance.findAll(widget.message.content);
-    if (refs.isEmpty) return const SizedBox.shrink();
     final bible = BibleService.instance;
+    final key = _keyRef;
+    // The anchor has its own card above; repeating it here would say the same
+    // thing twice and blunt the distinction the card exists to make.
+    final refs = bible
+        .findAll(_visibleText)
+        .where((r) => key == null || r != key)
+        .toList();
+    if (refs.isEmpty) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.only(top: 20),
@@ -249,7 +258,31 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// which may still carry the follow-up marker.
   String get _visibleText => _isUser
       ? widget.message.content
-      : FollowUps.strip(widget.message.content);
+      : KeyScripture.strip(FollowUps.strip(widget.message.content));
+
+  /// The passage EXODUS marked as the anchor of this reply, if any.
+  ///
+  /// The marked reference must ALSO appear in the reply itself. That guard is
+  /// not paranoia: BibleService.parse is deliberately lenient about book names
+  /// so that prose like "look at Ephesians 5" resolves, and the cost of that
+  /// leniency is that an invented book lands on a real passage —
+  /// "Hesitations 4:12" resolves to Song of Solomon 4:12. Without this check a
+  /// hallucinated marker would produce a large, confident card for a verse
+  /// EXODUS never cited, which is a worse failure than showing no card.
+  BibleRef? get _keyRef {
+    if (_isUser) return null;
+    final marked = KeyScripture.parse(widget.message.content);
+    if (marked == null) return null;
+
+    final bible = BibleService.instance;
+    final parsed = bible.parse(marked);
+    if (parsed == null) return null;
+    final resolved = bible.resolve(parsed);
+    if (resolved == null) return null;
+
+    // Cited in the reply, or it is not the anchor of anything.
+    return bible.findAll(_visibleText).contains(resolved) ? resolved : null;
+  }
 
   Widget _content(TextStyle style) {
     final message = widget.message;
@@ -434,6 +467,10 @@ class _MessageBubbleState extends State<MessageBubble> {
           ),
         ),
         // Scripture EXODUS cited, quoted where it stands.
+        // The anchor first and large, then the supporting citations. Nothing
+        // is shown while streaming: half a verse in a hero card looks broken.
+        if (!message.isStreaming && _keyRef != null)
+          ScriptureHeroCard(reference: _keyRef!),
         if (!message.isStreaming) _scriptureBlocks(),
         if (_showActions && _canShowActions) _actionBar(),
       ],
