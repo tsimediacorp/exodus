@@ -6,7 +6,7 @@ import '../models/saved_verse.dart';
 import '../services/bible_service.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
-import 'ridge_backdrop.dart';
+import 'scripture_background.dart';
 import 'scripture_link.dart';
 
 /// The passage a reply is built on, given its own card.
@@ -88,7 +88,7 @@ class _ScriptureHeroCardState extends State<ScriptureHeroCard> {
               children: [
                 // Seeded on the reference, so this passage always looks like
                 // itself rather than reshuffling as the thread rebuilds.
-                Positioned.fill(child: RidgeBackdrop(seed: _label)),
+                Positioned.fill(child: ScriptureBackground(seed: _label)),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
                   child: Row(

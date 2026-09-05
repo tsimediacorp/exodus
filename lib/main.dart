@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/splash_screen.dart';
 import 'services/amplify_service.dart';
+import 'services/card_backgrounds.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
 import 'services/storage_service.dart';
@@ -36,6 +37,10 @@ Future<void> main() async {
     } catch (_) {
       // .env missing or unreadable — AiService surfaces an auth error later.
     }
+
+    // Cheap: one manifest read. Until it finishes the scripture card falls
+    // back to the painted landscape, so nothing waits on it.
+    unawaited(CardBackgrounds.load());
 
     try {
       await StorageService.instance.init();

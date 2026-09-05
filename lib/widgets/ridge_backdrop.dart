@@ -169,23 +169,6 @@ class _RidgePainter extends CustomPainter {
       );
     }
 
-    // The text lives on the left, so darken that side enough to read against
-    // whatever the ridges happened to do there. This is the layer that makes
-    // the card legible regardless of the seed.
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: [
-            const Color(0xFF060A14).withValues(alpha: 0.92),
-            const Color(0xFF060A14).withValues(alpha: 0.55),
-            const Color(0xFF060A14).withValues(alpha: 0.10),
-          ],
-          stops: const [0.0, 0.46, 1.0],
-        ).createShader(rect),
-    );
   }
 
   @override
