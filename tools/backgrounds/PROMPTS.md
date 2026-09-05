@@ -98,3 +98,23 @@ sips -Z 1600 assets/backgrounds/*.jpg
 They stay as the fallback either way — `lib/widgets/ridge_backdrop.dart`,
 seeded per verse, four times of day. Deleting everything from
 `assets/backgrounds/` reverts to them with no other change.
+
+---
+
+## Checking a new image before it ships
+
+```bash
+python3 tools/backgrounds/check_contrast.py
+```
+
+The first set of eleven taught us this is not optional. The verse sits in an
+`Expanded`, so it runs to roughly **four fifths** of the card width — not the
+left third — while every one of these images puts its sun in the upper right.
+Three of the eleven left the end of each line on lit sky, and eight of the
+eleven put the small brass citation under 3:1. The scrim was measured and
+strengthened in response; the checker reads its values straight out of
+`lib/widgets/scripture_background.dart` so the two cannot drift apart.
+
+If an image fails, darken or replace it. Lightening the scrim to suit one
+photo weakens every other card, and `test/scripture_background_test.dart`
+will fail if you try.

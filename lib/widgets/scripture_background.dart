@@ -18,6 +18,27 @@ class ScriptureBackground extends StatelessWidget {
 
   const ScriptureBackground({super.key, required this.seed});
 
+  /// How hard the scrim presses at the left edge, the middle, and the right.
+  ///
+  /// These are measured, not chosen by eye. The verse sits in an Expanded and
+  /// so runs to roughly four fifths of the card — NOT just the left third —
+  /// while every photograph in the set puts its sun in the upper right. The
+  /// first version of this gradient faded to 0.12 at the right edge, which
+  /// left the end of each line sitting on lit sky: three of eleven images fell
+  /// under 4.5:1 for the verse, and eight of eleven under 3:1 for the brass
+  /// citation, which is the smaller and more fragile text of the two.
+  ///
+  /// At these values every image in the set clears both, with a blown
+  /// highlight still arriving at roughly 137/250 — a warm glow rather than a
+  /// grey slab. tools/backgrounds/check_contrast.py re-measures the whole
+  /// folder; run it after adding artwork.
+  static const List<double> scrimAlphas = [0.91, 0.68, 0.44];
+  static const List<double> scrimStops = [0.0, 0.46, 1.0];
+
+  /// The floor the measurement established. A lighter scrim than this has been
+  /// shown to make real photographs in this set unreadable.
+  static const double minimumScrimAlpha = 0.44;
+
   @override
   Widget build(BuildContext context) {
     final image = CardBackgrounds.pick(seed);
@@ -34,19 +55,16 @@ class ScriptureBackground extends StatelessWidget {
             // A missing or corrupt file must not take the reply down with it.
             errorBuilder: (_, __, ___) => RidgeBackdrop(seed: seed),
           ),
-        // The text sits on the left, so that side is darkened whatever the
-        // image happens to do there.
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                const Color(0xFF060A14).withValues(alpha: 0.90),
-                const Color(0xFF060A14).withValues(alpha: 0.55),
-                const Color(0xFF060A14).withValues(alpha: 0.12),
+                for (final a in scrimAlphas)
+                  const Color(0xFF060A14).withValues(alpha: a),
               ],
-              stops: const [0.0, 0.48, 1.0],
+              stops: scrimStops,
             ),
           ),
         ),
