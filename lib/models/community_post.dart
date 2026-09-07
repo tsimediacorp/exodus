@@ -1,3 +1,34 @@
+/// Strip the punctuation nobody types.
+///
+/// An em dash is the single clearest tell that a machine wrote a sentence.
+/// People typing on a phone use commas, full stops and the occasional run-on;
+/// they do not reach for U+2014. The prompt asks for this, and the model will
+/// still produce them, so it is enforced here rather than hoped for.
+///
+/// Applied to everything in a member's voice, on the way in AND on the way out
+/// of storage, so posts written before this existed are cleaned up too.
+///
+/// Horizontal whitespace only around each pattern: a dash opening a paragraph
+/// must not swallow the blank line before it and weld two paragraphs together.
+String asTyped(String text) {
+  var out = text
+      // " — ", "—", " -- " all become the comma a person would have used.
+      .replaceAll(RegExp(r'[ \t]*(?:—|–|--)[ \t]*'), ', ')
+      // A comma straight after other punctuation was doing no work.
+      .replaceAllMapped(
+          RegExp(r'([,.!?;:])[ \t]*,[ \t]*'), (m) => '${m[1]} ')
+      .replaceAll(RegExp(r',[ \t]*,+'), ',')
+      // The single-character ellipsis is the other giveaway.
+      .replaceAll('…', '...')
+      .replaceAll(RegExp(r'[ \t]{2,}'), ' ');
+
+  // A comma cannot open a line or close one.
+  out = out
+      .replaceAllMapped(RegExp(r'(^|\n)[ \t]*,[ \t]*'), (m) => m[1]!)
+      .replaceAllMapped(RegExp(r',[ \t]*(\n|$)'), (m) => m[1]!);
+  return out.trim();
+}
+
 /// One story in the community feed, with the conversation underneath it.
 ///
 /// Every post carries [composite] because every post currently IS one: written
@@ -64,11 +95,11 @@ class CommunityPost {
 
   factory CommunityPost.fromJson(Map<String, dynamic> j) => CommunityPost(
         id: j['id'] as String,
-        author: j['author'] as String? ?? 'A member',
-        authorContext: j['authorContext'] as String? ?? '',
+        author: asTyped(j['author'] as String? ?? 'A member'),
+        authorContext: asTyped(j['authorContext'] as String? ?? ''),
         tag: j['tag'] as String? ?? 'Marriage',
-        title: j['title'] as String? ?? '',
-        body: j['body'] as String? ?? '',
+        title: asTyped(j['title'] as String? ?? ''),
+        body: asTyped(j['body'] as String? ?? ''),
         composite: j['composite'] as bool? ?? true,
         read: j['read'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ??
@@ -93,11 +124,11 @@ class CommunityPost {
         .toList();
     return CommunityPost(
       id: id,
-      author: (json['author'] as String? ?? '').trim(),
-      authorContext: (json['authorContext'] as String? ?? '').trim(),
+      author: asTyped(json['author'] as String? ?? ''),
+      authorContext: asTyped(json['authorContext'] as String? ?? ''),
       tag: (json['tag'] as String? ?? 'Marriage').trim(),
-      title: (json['title'] as String? ?? '').trim(),
-      body: (json['body'] as String? ?? '').trim(),
+      title: asTyped(json['title'] as String? ?? ''),
+      body: asTyped(json['body'] as String? ?? ''),
       createdAt: createdAt,
       replies: [
         for (var i = 0; i < replies.length; i++)
@@ -154,8 +185,8 @@ class CommunityReply {
 
   factory CommunityReply.fromJson(Map<String, dynamic> j) => CommunityReply(
         id: j['id'] as String,
-        author: j['author'] as String? ?? 'A member',
-        body: j['body'] as String? ?? '',
+        author: asTyped(j['author'] as String? ?? 'A member'),
+        body: asTyped(j['body'] as String? ?? ''),
         fromAuthor: j['fromAuthor'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ??
             DateTime.now(),
@@ -168,8 +199,8 @@ class CommunityReply {
   }) =>
       CommunityReply(
         id: id,
-        author: (json['author'] as String? ?? '').trim(),
-        body: (json['body'] as String? ?? '').trim(),
+        author: asTyped(json['author'] as String? ?? ''),
+        body: asTyped(json['body'] as String? ?? ''),
         fromAuthor: json['fromAuthor'] as bool? ?? false,
         createdAt: createdAt,
       );

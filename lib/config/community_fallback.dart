@@ -63,7 +63,7 @@ means yet. I am trying to stop deciding what it means.''',
       'body': '''
 Not a huge amount. Two hundred a month for about three years, into an account
 in his name. He was not spending it on anything. That is the part I could not
-get past for a long time — there was no woman, no gambling, nothing to point
+get past for a long time, there was no woman, no gambling, nothing to point
 at. He just wanted something that was his.
 
 We are still in it, honestly. Six months of counselling and I still check

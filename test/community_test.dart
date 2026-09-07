@@ -142,6 +142,123 @@ void main() {
     });
   });
 
+  group('nobody types an em dash', () {
+    test('a dash becomes the comma a person would have used', () {
+      expect(asTyped('It was hard — harder than I expected.'),
+          'It was hard, harder than I expected.');
+      expect(asTyped('It was hard—harder than I expected.'),
+          'It was hard, harder than I expected.');
+      expect(asTyped('It was hard -- harder than that.'),
+          'It was hard, harder than that.');
+      expect(asTyped('Nine years – maybe ten.'), 'Nine years, maybe ten.');
+    });
+
+    test('it does not leave doubled or stranded punctuation', () {
+      expect(asTyped('I stopped. — Then he called.'),
+          'I stopped. Then he called.');
+      expect(asTyped('I stopped, — then he called.'),
+          'I stopped, then he called.');
+      expect(asTyped('— He called.'), 'He called.');
+      expect(asTyped('He called —'), 'He called');
+      expect(asTyped('one — two — three'), 'one, two, three');
+    });
+
+    test('a dash at a paragraph break does not open the next one', () {
+      expect(asTyped('First para.\n\n— Second para.'),
+          'First para.\n\nSecond para.');
+    });
+
+    test('the single-character ellipsis goes too', () {
+      expect(asTyped('I do not know…'), 'I do not know...');
+    });
+
+    test('ordinary text is left alone', () {
+      const plain = 'He said it at dinner, not even angry. All of it.';
+      expect(asTyped(plain), plain);
+      expect(asTyped('a well-meaning brother-in-law'),
+          'a well-meaning brother-in-law');
+    });
+
+    test('a generated post is clean in every field a reader sees', () {
+      final post = CommunityPost.fromGenerated({
+        'author': 'Marcus T.',
+        'authorContext': 'married 9 years — nearly ten',
+        'tag': 'Rebellion',
+        'title': 'He told us — at dinner',
+        'body': 'He said it at dinner — not even angry. Church, God, us, all '
+            'of it, and I did not have one word ready.',
+        'replies': [
+          {'author': 'Dani R.', 'body': 'That part — the deciding — lands here.',
+            'fromAuthor': false},
+          {'author': 'Marcus T.', 'body': 'It is the whole thing — honestly.',
+            'fromAuthor': true},
+        ],
+      }, id: 'x', createdAt: DateTime.now());
+
+      final seen = [
+        post.author,
+        post.authorContext,
+        post.title,
+        post.body,
+        for (final r in post.replies) ...[r.author, r.body],
+      ];
+      for (final text in seen) {
+        expect(text, isNot(contains('—')), reason: text);
+        expect(text, isNot(contains('–')), reason: text);
+      }
+      expect(post.title, 'He told us, at dinner');
+    });
+
+    test('posts written before this existed are cleaned on the way out', () {
+      final stored = CommunityPost.fromJson({
+        'id': 'old',
+        'author': 'Priya N.',
+        'authorContext': 'married 6 years',
+        'tag': 'Money',
+        'title': 'The account — I did not know about',
+        'body': 'Not a huge amount — two hundred a month for three years.',
+        'createdAt': DateTime(2026, 9, 1).toIso8601String(),
+        'replies': [
+          {
+            'id': 'old-r0',
+            'author': 'Aaron K.',
+            'body': 'I was the one — with the account.',
+            'fromAuthor': false,
+            'createdAt': DateTime(2026, 9, 1, 3).toIso8601String(),
+          },
+        ],
+      });
+      expect(stored.title, isNot(contains('—')));
+      expect(stored.body, isNot(contains('—')));
+      expect(stored.replies.first.body, isNot(contains('—')));
+    });
+
+    test('the offline stories contain none either', () {
+      for (final raw in CommunityFallback.posts) {
+        final post = CommunityPost.fromGenerated(
+            Map<String, dynamic>.from(raw),
+            id: 'f',
+            createdAt: DateTime.now());
+        for (final text in [
+          post.title,
+          post.body,
+          for (final r in post.replies) r.body,
+        ]) {
+          expect(text, isNot(contains('—')), reason: text);
+        }
+      }
+    });
+
+    test('the prompt forbids them, and does not model them either', () {
+      final task = CommunityPrompt.task(memoryBlock: '', count: 3);
+      expect(task, contains('Never use an em dash'));
+      // Showing the model em dashes while telling it not to use them is the
+      // weakest possible instruction.
+      expect(task, isNot(contains('—')));
+      expect(task, isNot(contains('–')));
+    });
+  });
+
   group('what the posts must never be', () {
     test('every post records that EXODUS wrote it, for the launch cleanup', () {
       final post = CommunityPost.fromGenerated(_post(),
@@ -172,7 +289,15 @@ void main() {
       final task = CommunityPrompt.task(
           memoryBlock: 'They argue about her mother.', count: 3);
       expect(task, contains('They argue about her mother.'));
-      expect(task, contains('RHYME'));
+    });
+
+    test('the prompt keeps the stories at arm\'s length', () {
+      final task = CommunityPrompt.task(
+          memoryBlock: 'They argue about her mother.', count: 3);
+      expect(task, contains('DO NOT WRITE THEIR LIFE BACK TO THEM'));
+      expect(task, contains('half-recognisable'));
+      // A feed that only mirrors them is not a group.
+      expect(task, contains('one post in three'));
     });
   });
 }

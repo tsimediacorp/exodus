@@ -25,11 +25,24 @@ child, feeling unseen, resentment that never got named, disagreement about
 church or faith, exhaustion.
 '''
         : '''
-Here is what you know about the couple who will read these. Choose situations
-that RHYME with theirs — near enough that they recognise themselves, not so
-near that it reads as their own file handed back to them.
+Here is what you know about the couple who will read these.
 
 $memoryBlock
+
+DO NOT WRITE THEIR LIFE BACK TO THEM. Aim for about half-recognisable: the
+same KIND of ache, different circumstances, different specifics. If they are
+fighting about her mother, write about a brother-in-law who moved in for three
+months. If the trouble is a teenage son, write about a daughter who stopped
+calling. If it is money, write about someone whose money turned out not to be
+about money at all.
+
+The test is simple. A reader should think "that is close to us". If they could
+map the post onto their own life point for point, it is far too close, and
+what they will feel is watched rather than accompanied.
+
+And at least one post in three should be about something they are NOT dealing
+with at all. A real group is full of people whose problems are not yours;
+that is most of what makes it feel like a group rather than a mirror.
 ''';
 
     final avoid = StringBuffer();
@@ -56,7 +69,7 @@ WHAT A POST IS
 A member telling the group something they are IN or have been THROUGH, in
 their own words. Not advice. Not a testimony delivered from the far side with
 everything tidy. The reader is meant to finish it thinking "that is my house"
-— which only happens if the person sounds like someone who was actually there.
+That only happens if the person sounds like someone who was actually there.
 
 Make them specific. "We fought about money" is nothing. "I found out he had
 been putting 200 dollars a month into an account I did not know about, and the
@@ -83,9 +96,15 @@ VOICE
 
 These are ordinary people, not preachers. Contractions. Unfinished thoughts.
 Somebody swears mildly at most; nobody quotes Greek. Scripture appears only
-where a real person would reach for it — one verse, plainly, maybe misremembered
-slightly — and in most posts not at all. A feed of people quoting chapter and
-verse at each other is not a community, it is a tract.
+where a real person would reach for it, one verse, plainly, maybe
+misremembered slightly, and in most posts not at all. A feed of people quoting
+chapter and verse at each other is not a community, it is a tract.
+
+PUNCTUATION. Never use an em dash or an en dash, anywhere, in any field. Not
+one. Nobody typing on a phone reaches for those, and a single one gives the
+whole thing away. Use a comma, or start a new sentence. The same goes for
+double hyphens and for the single-character ellipsis. Ordinary commas, full
+stops and question marks only.
 
 Names: first name and last initial ("Marcus T.", "Dani R."). Vary ages,
 backgrounds and how long they have been married.
@@ -97,8 +116,8 @@ WHAT NOT TO WRITE
 - Nobody's marriage is saved by a single prayer or a single conversation. The
   turn, where there is one, took months and cost something.
 - If a post touches abuse, addiction, or someone wanting to hurt themselves,
-  the person got outside help — a counsellor, a doctor, a shelter, their
-  church — and says so. Never "we prayed and it stopped." A reader in that
+  the person got outside help, a counsellor, a doctor, a shelter, their
+  church, and says so. Never "we prayed and it stopped." A reader in that
   situation may act on what they read here.
 - No miracle money, no cured illness, no spouse transformed overnight.
 - Do not mention EXODUS, this app, or any app.
