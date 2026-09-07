@@ -8,8 +8,10 @@ import '../services/daily_verse.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/arrival.dart';
+import '../widgets/community_strip.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/page_backdrop.dart';
+import '../widgets/scripture_background.dart';
 import '../widgets/scripture_link.dart';
 
 /// The landing screen: a greeting, the day's verse, and the conversations
@@ -114,6 +116,10 @@ class HomeScreenState extends State<HomeScreen> {
                     fontSize: 15,
                     letterSpacing: 0.2,
                   )),
+              const SizedBox(height: 22),
+              // Above the verse on purpose: on a hard morning, knowing someone
+              // else is in it lands before scripture does.
+              const CommunityStrip(),
               const SizedBox(height: 20),
               _verseCard(),
               const SizedBox(height: 18),
@@ -186,11 +192,13 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// The day's verse.
+  /// The day's verse, over the same photography as the scripture cards in
+  /// chat.
   ///
-  /// The right-hand panel is a gradient standing in for artwork — the design
-  /// shows a photograph there, and inventing one is worse than leaving a
-  /// deliberate space for the real thing.
+  /// This carried a placeholder gradient for as long as there was no artwork.
+  /// There is now, and it is seeded on the reference — so today's verse looks
+  /// the same all day on both partners' phones, and tomorrow's looks like
+  /// something else.
   Widget _verseCard() {
     final reference = DailyVerse.referenceFor();
     final text = _bibleReady ? DailyVerse.textFor() : '';
@@ -202,35 +210,17 @@ class HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(18),
         onTap: () => openScriptureRef(context, reference),
         child: Container(
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border:
                 Border.all(color: ExodusTheme.brass.withValues(alpha: 0.28)),
-            gradient: const LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [Color(0xFF12203D), Color(0xFF1E3358)],
-            ),
           ),
           child: Stack(
             children: [
               Positioned.fill(
                 child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: RadialGradient(
-                        center: const Alignment(0.95, -0.5),
-                        radius: 1.0,
-                        colors: [
-                          ExodusTheme.brassGlow.withValues(alpha: 0.30),
-                          ExodusTheme.brass.withValues(alpha: 0.06),
-                          ExodusTheme.brass.withValues(alpha: 0),
-                        ],
-                        stops: const [0.0, 0.42, 0.78],
-                      ),
-                    ),
-                  ),
+                  child: ScriptureBackground(seed: reference),
                 ),
               ),
               Padding(

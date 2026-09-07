@@ -4,6 +4,7 @@ import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/check_in.dart';
 import '../models/coaching_session.dart';
+import '../models/community_post.dart';
 import '../models/confession.dart';
 import '../models/conversation.dart';
 import '../models/devotional.dart';
@@ -56,6 +57,10 @@ class StorageService {
   // Confessions are stored under their own key and never merged into
   // conversations or memory — see ConfessionService for why that matters.
   static const _kConfessions       = 'exodus.confessions';
+  // The community feed is generated on device from memory and never
+  // leaves it — see CommunityService for why that matters.
+  static const _kCommunityPosts    = 'exodus.community.posts';
+  static const _kCommunityLastDay  = 'exodus.community.lastDay';
 
   /// Why storage could not be opened, or null when it is working.
   ///
@@ -617,6 +622,35 @@ class StorageService {
       }
     }
     MasterPrompt.activeProviderOverride = value;
+  }
+
+  // ---------------- Community ----------------
+
+  List<CommunityPost> loadCommunityPosts() {
+    final raw = _prefs?.getString(_kCommunityPosts);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => CommunityPost.fromJson(e as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveCommunityPosts(List<CommunityPost> posts) async {
+    await _prefs?.setString(
+        _kCommunityPosts, jsonEncode(posts.map((p) => p.toJson()).toList()));
+  }
+
+  /// The day stamp of the last generation, or empty. Empty means "never", and
+  /// is what [CommunityService.reset] writes to force a rebuild.
+  String get communityLastDay => _prefs?.getString(_kCommunityLastDay) ?? '';
+
+  Future<void> setCommunityLastDay(String stamp) async {
+    await _prefs?.setString(_kCommunityLastDay, stamp);
   }
 
   Future<void> resetAllOverrides() async {

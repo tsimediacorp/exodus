@@ -18,6 +18,15 @@ void main() {
     await tester.pump();
   }
 
+  /// The community strip sits above the verse, so the conversations section
+  /// starts below the fold on a test-sized screen. Scroll to it the way a
+  /// reader would rather than asserting against what happens to fit.
+  Future<void> scrollTo(WidgetTester tester, Finder target) async {
+    await tester.scrollUntilVisible(target, 120,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pump();
+  }
+
   group('home', () {
     testWidgets('greets and shows the day\'s verse', (tester) async {
       await open(tester);
@@ -25,6 +34,7 @@ void main() {
       expect(find.text('Real conversations. A higher perspective.'),
           findsOneWidget);
       expect(find.text('TODAY’S VERSE'), findsOneWidget);
+      await scrollTo(tester, find.text('Conversations'));
       expect(find.text('Conversations'), findsOneWidget);
     });
 
@@ -32,6 +42,8 @@ void main() {
       var started = false;
       await open(tester, onNew: () => started = true);
       // Storage is unavailable in tests, so this is the genuine empty state.
+      await scrollTo(
+          tester, find.textContaining('Start your first conversation'));
       expect(find.textContaining('Start your first conversation'),
           findsOneWidget);
       await tester.tap(find.textContaining('Start your first conversation'));
@@ -47,6 +59,7 @@ void main() {
     testWidgets('searching an empty list says so in the query\'s words',
         (tester) async {
       await open(tester);
+      await scrollTo(tester, find.byType(TextField));
       await tester.enterText(find.byType(TextField), 'money');
       await tester.pump();
       expect(find.textContaining('Nothing matches'), findsOneWidget);
