@@ -71,12 +71,6 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     height: 1.15,
                     letterSpacing: -0.3,
                   )),
-              const SizedBox(height: 8),
-              const Text(CommunityPrompt.compositeNotice,
-                  style: TextStyle(
-                      color: ExodusTheme.ironMist,
-                      fontSize: 13,
-                      height: 1.5)),
               const SizedBox(height: 18),
               if (_tags.length > 1) _filters(),
               if (_tags.length > 1) const SizedBox(height: 16),

@@ -57,12 +57,6 @@ class _CommunityStripState extends State<CommunityStrip> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _header(),
-        const SizedBox(height: 4),
-        const Text(
-          CommunityPrompt.compositeNotice,
-          style: TextStyle(
-              color: ExodusTheme.ironMist, fontSize: 11.5, height: 1.45),
-        ),
         const SizedBox(height: 12),
         if (posts.isEmpty)
           _placeholder()

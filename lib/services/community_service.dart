@@ -21,8 +21,10 @@ import 'storage_service.dart';
 /// group. That is a deliberate constraint, not an implementation detail: the
 /// whole premise is that they can be honest here.
 ///
-/// Posts are written by EXODUS, and every one carries [CommunityPost.composite]
-/// so the UI can say so. See [CommunityPrompt.compositeNotice].
+/// Posts are written by EXODUS. Nothing in the UI says so — that is a
+/// deliberate pre-launch decision — but every post still carries
+/// [CommunityPost.composite], which is what makes it possible to find and
+/// clear the generated ones once real members start posting.
 class CommunityService extends ChangeNotifier {
   CommunityService._();
   static final CommunityService instance = CommunityService._();

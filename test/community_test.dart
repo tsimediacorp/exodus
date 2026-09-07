@@ -142,8 +142,8 @@ void main() {
     });
   });
 
-  group('the disclosure', () {
-    test('every generated post is marked composite', () {
+  group('what the posts must never be', () {
+    test('every post records that EXODUS wrote it, for the launch cleanup', () {
       final post = CommunityPost.fromGenerated(_post(),
           id: 'x', createdAt: DateTime.now());
       expect(post.composite, isTrue);
@@ -157,12 +157,6 @@ void main() {
             createdAt: DateTime.now());
         expect(post.isUsable, isTrue, reason: '${post.title} is not showable');
       }
-    });
-
-    test('the notice says who wrote them', () {
-      expect(CommunityPrompt.compositeNotice.toLowerCase(),
-          contains('exodus'));
-      expect(CommunityPrompt.compositeNotice, isNotEmpty);
     });
 
     test('the prompt forbids the single-prayer fix and demands outside help',

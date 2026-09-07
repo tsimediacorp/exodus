@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../config/community_prompt.dart';
 import '../models/community_post.dart';
 import '../services/community_service.dart';
 import '../theme/exodus_theme.dart';
@@ -83,8 +82,6 @@ class _CommunityThreadScreenState extends State<CommunityThreadScreen> {
                   _replyDivider(post.replyCount),
                   const SizedBox(height: 6),
                   for (final reply in post.replies) _replyTile(reply, post),
-                  const SizedBox(height: 22),
-                  if (post.composite) _notice(),
                 ],
               ),
             ],
@@ -215,32 +212,6 @@ class _CommunityThreadScreenState extends State<CommunityThreadScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _notice() {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: ExodusTheme.midnight.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ExodusTheme.steel),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline_rounded,
-              size: 16, color: ExodusTheme.ironMist),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              CommunityPrompt.compositeNotice,
-              style: TextStyle(
-                  color: ExodusTheme.ironMist, fontSize: 12.5, height: 1.5),
-            ),
-          ),
-        ],
       ),
     );
   }

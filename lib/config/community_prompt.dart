@@ -7,16 +7,6 @@
 class CommunityPrompt {
   CommunityPrompt._();
 
-  /// Shown once above the feed. The stories are written by EXODUS, and a
-  /// couple leaning on one deserves to know that before they lean.
-  ///
-  /// This is a single string on purpose: it is the whole of the disclosure, so
-  /// changing the wording is a one-line change and removing it is a visible
-  /// one.
-  static const String compositeNotice =
-      'Composite stories, written by EXODUS from what couples bring it. '
-      'Real names and details are not used.';
-
   /// What the feed is called.
   static const String sectionTitle = 'You are not the only one';
 

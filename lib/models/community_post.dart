@@ -1,10 +1,11 @@
 /// One story in the community feed, with the conversation underneath it.
 ///
 /// Every post carries [composite] because every post currently IS one: written
-/// by EXODUS from the patterns couples bring it, not typed by a stranger. The
-/// flag is stored per post rather than assumed globally, so the day real
-/// members start posting, both kinds can sit in one feed and the UI can tell
-/// them apart without a migration.
+/// by EXODUS from the patterns couples bring it, not typed by a stranger.
+/// Nothing shown to the reader distinguishes them today. The flag is kept per
+/// post anyway, and stored rather than inferred, because the plan is to clear
+/// the generated ones at launch — and that is only possible if each post
+/// already knows which it is.
 class CommunityPost {
   final String id;
 
@@ -28,7 +29,8 @@ class CommunityPost {
   final DateTime createdAt;
   final List<CommunityReply> replies;
 
-  /// Written by EXODUS rather than posted by a member.
+  /// Written by EXODUS rather than posted by a member. Not surfaced in the UI;
+  /// this is what makes the generated posts findable when they are cleared.
   final bool composite;
 
   /// True once the couple has opened the thread.
