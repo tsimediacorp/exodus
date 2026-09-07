@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/remote_config.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/arrival.dart';
 import '../widgets/page_backdrop.dart';
@@ -51,12 +52,18 @@ class LibraryScreen extends StatelessWidget {
         blurb: 'What EXODUS wrote to you both.',
         page: const LettersScreen(),
       ),
-      (
-        icon: Icons.psychology_outlined,
-        name: 'Memory',
-        blurb: 'What EXODUS remembers, and what to forget.',
-        page: const MemoryScreen(),
-      ),
+      // Gated for the closed beta: half the testers get to see and edit what
+      // EXODUS remembers, half do not, so we can tell whether editing it makes
+      // counsel feel more trustworthy or just more fiddly. Off means the
+      // entry is absent rather than disabled, because a locked door still
+      // tells you there is a room.
+      if (RemoteConfig.instance.flag('memoryEditing'))
+        (
+          icon: Icons.psychology_outlined,
+          name: 'Memory',
+          blurb: 'What EXODUS remembers, and what to forget.',
+          page: const MemoryScreen(),
+        ),
     ];
 
     return Scaffold(

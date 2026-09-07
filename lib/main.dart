@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/splash_screen.dart';
+import 'screens/update_required_screen.dart';
 import 'services/amplify_service.dart';
 import 'services/card_backgrounds.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
+import 'services/remote_config.dart';
 import 'services/storage_service.dart';
 import 'theme/exodus_theme.dart';
 
@@ -75,6 +77,14 @@ Future<void> main() async {
       // Notifications are best-effort; the app still works without them.
     }
 
+    // What the admin panel is telling this build: the force-update gate and
+    // the closed-beta flags. The cached answer is read first so a launch with
+    // no network still honours a gate set yesterday, and the live fetch is
+    // given a short leash for the same reason the backend is below — nothing
+    // here may hold the first frame hostage.
+    await RemoteConfig.instance.loadCached();
+    unawaited(RemoteConfig.instance.refresh());
+
     // Couples-in-Sync backend. Best-effort: the local-first app works without
     // it, so a slow network must not hold the first frame hostage.
     try {
@@ -118,7 +128,13 @@ class ExodusApp extends StatelessWidget {
       title: 'EXODUS',
       debugShowCheckedModeBanner: false,
       theme: ExodusTheme.build(),
-      home: err != null ? _ErrorView(message: err) : const SplashScreen(),
+      home: err != null
+          ? _ErrorView(message: err)
+          // A build below the minimum never reaches the app. Checked here
+          // rather than inside the shell so there is no route back to it.
+          : RemoteConfig.instance.updateRequired
+              ? const UpdateRequiredScreen()
+              : const SplashScreen(),
     );
   }
 }
