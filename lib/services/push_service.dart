@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/build_info.dart';
+import 'debug_sync.dart';
 import 'notification_service.dart';
 
 /// Remote push, so the admin panel can reach a device.
@@ -115,6 +116,13 @@ class PushService {
   /// one is raised locally. Without this an admin push sent to someone
   /// actively using the app simply vanishes, which reads as a broken send.
   void _handleForeground(RemoteMessage message) {
+    // A push announcing a message from EXODUS arrives before the message
+    // itself does. Pull it now so the thread is right when they open it,
+    // rather than empty under a notification that said otherwise.
+    if ((message.data['payload'] as String? ?? '')
+        .startsWith(NotificationService.chatPayload)) {
+      unawaited(DebugSync.instance.drain());
+    }
     final notification = message.notification;
     if (notification == null) return;
     NotificationService.instance.deliverNow(
@@ -128,8 +136,15 @@ class PushService {
   /// so there is one place that decides where a tap lands.
   void _handleOpened(RemoteMessage message) {
     final payload = message.data['payload'] as String?;
-    if (payload != null && payload.isNotEmpty) {
-      NotificationService.instance.routeFromPush(payload);
+    if (payload == null || payload.isEmpty) return;
+    if (payload.startsWith(NotificationService.chatPayload)) {
+      // Fetch first, then route. Opening the thread and watching the message
+      // appear a second later reads as a glitch.
+      unawaited(DebugSync.instance
+          .drain()
+          .whenComplete(() => NotificationService.instance.routeFromPush(payload)));
+      return;
     }
+    NotificationService.instance.routeFromPush(payload);
   }
 }

@@ -72,6 +72,25 @@ class MemoryStore extends ChangeNotifier {
     await _persist();
   }
 
+  /// Replace everything with [texts], in order.
+  ///
+  /// Used by the admin panel during the closed beta, which hands back the
+  /// whole list rather than a diff. Deliberately skips the near-duplicate
+  /// check in [addMany]: whoever edited this list meant what they typed, and
+  /// silently dropping a line they wrote would look like a failed save.
+  Future<void> replaceAll(Iterable<String> texts) async {
+    _items
+      ..clear()
+      ..addAll([
+        for (final text in texts)
+          if (text.trim().isNotEmpty) MemoryItem.create(text.trim(), 'admin'),
+      ]);
+    if (_items.length > maxItems) {
+      _items.removeRange(0, _items.length - maxItems);
+    }
+    await _persist();
+  }
+
   Future<void> clear() async {
     _items.clear();
     await _persist();

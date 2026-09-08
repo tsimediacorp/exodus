@@ -63,6 +63,8 @@ class _HomeShellState extends State<HomeShell> {
         .addListener(_onOpenDevotional);
     NotificationService.instance.openCheckInRequested
         .addListener(_onOpenCheckIn);
+    NotificationService.instance.openConversationRequested
+        .addListener(_onOpenConversationFromPush);
     // Ask once the app is actually on screen, with a reason, rather than
     // firing the one system dialog Android allows before the couple has seen
     // anything.
@@ -77,6 +79,8 @@ class _HomeShellState extends State<HomeShell> {
         .removeListener(_onOpenDevotional);
     NotificationService.instance.openCheckInRequested
         .removeListener(_onOpenCheckIn);
+    NotificationService.instance.openConversationRequested
+        .removeListener(_onOpenConversationFromPush);
     super.dispose();
   }
 
@@ -100,6 +104,18 @@ class _HomeShellState extends State<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _chatKey.currentState?.openCheckInById(id);
     });
+  }
+
+  /// A message the admin panel placed in a thread, tapped from its push.
+  ///
+  /// Beta scaffolding. DebugSync has already fetched the message by the time
+  /// this runs, so the thread opens with it in place rather than appearing a
+  /// second later, which would read as a glitch.
+  void _onOpenConversationFromPush() {
+    final id = NotificationService.instance.openConversationRequested.value;
+    if (id == null || !mounted) return;
+    NotificationService.instance.openConversationRequested.value = null;
+    _openConversation(id);
   }
 
   /// The shield in a mode's app bar returns to Home. With no drawer there is

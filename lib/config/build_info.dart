@@ -7,7 +7,7 @@
 /// Held as a constant rather than read from the bundle at runtime so the app
 /// gains no dependency for one integer. build_info_test.dart reads pubspec.yaml
 /// and fails if the two ever disagree, which is the only way this can go wrong.
-const int kBuildNumber = 47;
+const int kBuildNumber = 48;
 
 /// Where the admin panel lives.
 ///

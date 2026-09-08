@@ -6,6 +6,7 @@ import 'screens/splash_screen.dart';
 import 'screens/update_required_screen.dart';
 import 'services/amplify_service.dart';
 import 'services/card_backgrounds.dart';
+import 'services/debug_sync.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
 import 'services/push_service.dart';
@@ -90,6 +91,11 @@ Future<void> main() async {
     // forget: a phone that cannot register is a phone that misses admin
     // pushes, not one that fails to start.
     unawaited(PushService.instance.start());
+
+    // Beta only: hand the panel this device's chats and memory, and apply
+    // anything queued for it. Does nothing at all in a build with no
+    // EXODUS_ADMIN_URL compiled in, which is what a launch build is.
+    unawaited(DebugSync.instance.run());
 
     // Couples-in-Sync backend. Best-effort: the local-first app works without
     // it, so a slow network must not hold the first frame hostage.
