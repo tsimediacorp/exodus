@@ -60,6 +60,14 @@ export const KNOWN_FLAGS: { key: string; label: string; blurb: string }[] = [
     blurb: 'The stories above the daily verse on the home screen.',
   },
   {
+    key: 'communityCuratedOnly',
+    label: 'Only show curated stories',
+    blurb:
+      'Devices show only what is on the Stories page and stop generating '
+      + 'their own. What you want for a demo, where the feed has to be '
+      + 'exactly what you expect.',
+  },
+  {
     key: 'coaching',
     label: 'Live coaching',
     blurb: 'Spoken sessions over WebRTC. Expensive per minute; worth gating.',
@@ -81,7 +89,12 @@ export const DEFAULT_CONFIG: AdminConfig = {
       message: 'A new build is ready with fixes you asked for.',
     },
   },
-  flags: { memoryEditing: true, community: true, coaching: true },
+  flags: {
+    memoryEditing: true,
+    community: true,
+    coaching: true,
+    communityCuratedOnly: false,
+  },
   ab: { salt: 'exodus', bPercent: 0 },
   overrides: {},
   updatedAt: new Date(0).toISOString(),

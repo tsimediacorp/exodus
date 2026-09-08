@@ -67,6 +67,12 @@ class CommunityPost {
   /// True once the couple has opened the thread.
   bool read;
 
+  /// Written in the admin panel rather than generated on the device.
+  ///
+  /// Curated posts are replaced wholesale on every check-in, so this is what
+  /// tells the device which of its posts it is allowed to throw away.
+  bool get curated => id.startsWith('curated-');
+
   CommunityPost({
     required this.id,
     required this.author,

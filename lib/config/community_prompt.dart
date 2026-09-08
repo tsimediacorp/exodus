@@ -10,19 +10,66 @@ class CommunityPrompt {
   /// What the feed is called.
   static const String sectionTitle = 'You are not the only one';
 
+  /// Ground a post can stand on.
+  ///
+  /// Rotated by the day rather than left to the model. Asked openly for "what
+  /// couples struggle with" it returns hidden money, in-laws and a rebellious
+  /// teenager every single time, which is why the feed read as static: each
+  /// day generated a fresh variant of the same five stories.
+  static const List<String> subjects = [
+    'money, and who gets to decide',
+    'a parent or in-law who will not stay out of it',
+    'a child pulling away from the faith',
+    'feeling invisible in your own house',
+    'resentment that was never named out loud',
+    'one of you believes and the other is pretending',
+    'exhaustion, and having nothing left to give each other',
+    'wanting different amounts of closeness',
+    'a grief one of you is carrying alone',
+    'anger that arrives faster than either of you expected',
+    'jealousy of a friend, a sibling, or the life you did not pick',
+    'work that has quietly become the third person in the marriage',
+    'recovery, and living with someone else\'s',
+    'an illness that reorganised everything',
+    'stepchildren, and never quite knowing your place',
+    'wanting a child, or not, or not yet',
+    'moving somewhere neither of you knows anyone',
+    'friendships that did not survive the marriage',
+    'a betrayal that was not an affair',
+    'praying about the same thing for years with no answer',
+    'money arriving rather than money leaving',
+    'a parent whose care has landed on you',
+    'the difference between being forgiven and being trusted again',
+    'silence that started as peace and became distance',
+  ];
+
+  /// [count] subjects for [dayIndex], never the same set two days running.
+  ///
+  /// Strided rather than shuffled so consecutive days cannot overlap: with a
+  /// random pick, two days in a row landing on money would look exactly like
+  /// the bug this replaced.
+  static List<String> subjectsFor(int dayIndex, int count) {
+    if (count <= 0) return const [];
+    final start = (dayIndex * count) % subjects.length;
+    return [
+      for (var i = 0; i < count && i < subjects.length; i++)
+        subjects[(start + i) % subjects.length],
+    ];
+  }
+
   static String task({
     required String memoryBlock,
     required int count,
+    required int dayIndex,
     List<String> recentTitles = const [],
     List<String> recentAuthors = const [],
     List<String> recentTags = const [],
   }) {
+    final ground = subjectsFor(dayIndex, count);
     final knows = memoryBlock.trim().isEmpty
         ? '''
-You do not yet know what this couple is carrying. Write about the things most
-couples hit early: money and who decides, in-laws, a rebellious or distant
-child, feeling unseen, resentment that never got named, disagreement about
-church or faith, exhaustion.
+You do not yet know what this couple is carrying, so write from the ground
+listed below and nothing else.
 '''
         : '''
 Here is what you know about the couple who will read these.
@@ -64,6 +111,13 @@ Write $count posts for the EXODUS community feed.
 
 $knows
 ${avoid.isEmpty ? '' : '\n$avoid'}
+THE GROUND FOR THIS BATCH
+
+Write one post for each of these, in this order, and do not stray onto another
+subject even if it feels more natural:
+
+${ground.asMap().entries.map((e) => '${e.key + 1}. ${e.value}').join('\n')}
+
 WHAT A POST IS
 
 A member telling the group something they are IN or have been THROUGH, in
@@ -71,9 +125,13 @@ their own words. Not advice. Not a testimony delivered from the far side with
 everything tidy. The reader is meant to finish it thinking "that is my house"
 That only happens if the person sounds like someone who was actually there.
 
-Make them specific. "We fought about money" is nothing. "I found out he had
-been putting 200 dollars a month into an account I did not know about, and the
-worst part was he was not spending it on anything" is a post.
+Make them specific. A category is not a story. "We fought about money" tells
+the reader nothing; one exact thing that happened, with the detail that made it
+sting, is a post. Reach for the ordinary and precise -- an amount, a room, a
+sentence somebody actually said, the thing that turned out not to be the point.
+
+Invent those details fresh every time. Do not reuse an example you have seen,
+including anything in these instructions.
 
 VARY THE DISTANCE FROM THE PROBLEM. Roughly:
 - a third should be years past it, able to say plainly what changed

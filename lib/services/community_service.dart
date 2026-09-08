@@ -8,8 +8,12 @@ import '../config/community_fallback.dart';
 import '../config/community_prompt.dart';
 import '../models/chat_message.dart';
 import '../models/community_post.dart';
+import 'package:http/http.dart' as http;
+
 import 'ai_service.dart';
+import '../config/build_info.dart';
 import 'memory_store.dart';
+import 'remote_config.dart';
 import 'storage_service.dart';
 
 /// The community feed: stories tailored to what this couple is actually
@@ -58,22 +62,86 @@ class CommunityService extends ChangeNotifier {
     _loaded = true;
   }
 
+  /// Pull the stories written in the admin panel.
+  ///
+  /// The whole set replaces the previous one rather than merging, which is
+  /// what makes an edit or a delete in the panel actually take effect: a merge
+  /// would leave a deleted story on every device that had already seen it,
+  /// with no way to get it off.
+  ///
+  /// Generated posts are untouched. Returns whether anything changed.
+  Future<bool> _syncCurated() async {
+    if (kAdminBaseUrl.isEmpty) return false;
+    try {
+      final response = await http
+          .get(Uri.parse('$kAdminBaseUrl/api/v1/stories'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return false;
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return false;
+      final raw = (decoded['stories'] as List<dynamic>?) ?? const [];
+
+      final curated = <CommunityPost>[];
+      for (final entry in raw) {
+        if (entry is! Map<String, dynamic>) continue;
+        final id = entry['id'] as String?;
+        if (id == null || id.isEmpty) continue;
+        final post = CommunityPost.fromGenerated(
+          entry,
+          id: id,
+          createdAt: DateTime.tryParse(entry['publishedAt'] as String? ?? '') ??
+              DateTime.now(),
+        );
+        // A curated story is shown as written. The usable check exists to
+        // catch a model producing junk, not to overrule someone who typed it.
+        if (post.title.isNotEmpty && post.body.isNotEmpty) curated.add(post);
+      }
+
+      final wasRead = {
+        for (final p in _posts)
+          if (p.curated && p.read) p.id,
+      };
+      for (final post in curated) {
+        post.read = wasRead.contains(post.id);
+      }
+
+      _posts = [..._posts.where((p) => !p.curated), ...curated];
+      _posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      await StorageService.instance.saveCommunityPosts(_posts);
+      return true;
+    } catch (_) {
+      // Panel down or no network. The stories already on the device stand.
+      return false;
+    }
+  }
+
   /// Seed on first run, then top up once a day.
   ///
   /// Safe to call on every home-screen build: it returns immediately when
   /// today's posts already exist, and only one generation runs at a time.
-  Future<void> ensureFresh() async {
+  Future<void> ensureFresh({bool force = false}) async {
     load();
     if (_working) return;
 
     final storage = StorageService.instance;
     final today = _dayStamp(DateTime.now());
-    if (_posts.isNotEmpty && storage.communityLastDay == today) return;
+    final alreadyToday = _posts.isNotEmpty && storage.communityLastDay == today;
 
     _working = true;
-    lastError = null;
+    if (force) lastError = null;
     notifyListeners();
     try {
+      // Curated stories are checked on every launch, not once a day: an edit
+      // in the panel should reach a demo phone in seconds, not tomorrow.
+      final curatedChanged = await _syncCurated();
+      if (curatedChanged) notifyListeners();
+
+      // With curated-only on, the panel is the whole feed and generating would
+      // put stories on the device that nobody chose.
+      if (RemoteConfig.instance.flag('communityCuratedOnly')) return;
+      if (alreadyToday && !force) return;
+
+      lastError = null;
       final fresh = await _generate(_posts.isEmpty ? seedCount : dailyCount);
       if (fresh.isNotEmpty) {
         _merge(fresh);
@@ -123,6 +191,11 @@ class CommunityService extends ChangeNotifier {
     if (_posts.length > maxPosts) _posts = _posts.sublist(0, maxPosts);
   }
 
+  /// Days since a fixed epoch. Only used to rotate the subjects, so it must
+  /// advance by exactly one a day and never depend on the time of day.
+  static int _dayIndex(DateTime d) =>
+      DateTime(d.year, d.month, d.day).difference(DateTime(2000)).inDays;
+
   static String _dayStamp(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
@@ -150,6 +223,8 @@ class CommunityService extends ChangeNotifier {
           userMessage: CommunityPrompt.task(
             memoryBlock: MemoryStore.instance.promptBlock(),
             count: count,
+            // Rotates the subjects so today's batch cannot repeat yesterday's.
+            dayIndex: _dayIndex(DateTime.now()),
             recentTitles: _posts.take(12).map((p) => p.title).toList(),
             recentAuthors: _posts.take(12).map((p) => p.author).toList(),
             recentTags: _posts.take(8).map((p) => p.tag).toList(),

@@ -250,12 +250,85 @@ void main() {
     });
 
     test('the prompt forbids them, and does not model them either', () {
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3);
+      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
       expect(task, contains('Never use an em dash'));
       // Showing the model em dashes while telling it not to use them is the
       // weakest possible instruction.
       expect(task, isNot(contains('—')));
       expect(task, isNot(contains('–')));
+    });
+  });
+
+  group('the subjects rotate, or the feed reads as static', () {
+    test('consecutive days do not overlap', () {
+      for (var day = 0; day < 40; day++) {
+        final today = CommunityPrompt.subjectsFor(day, 3).toSet();
+        final tomorrow = CommunityPrompt.subjectsFor(day + 1, 3).toSet();
+        expect(today.intersection(tomorrow), isEmpty, reason: 'day $day');
+      }
+    });
+
+    test('a batch has no repeats inside it', () {
+      for (var day = 0; day < 40; day++) {
+        final batch = CommunityPrompt.subjectsFor(day, 5);
+        expect(batch.toSet().length, batch.length, reason: 'day $day');
+      }
+    });
+
+    test('a week of batches covers real breadth', () {
+      final week = <String>{};
+      for (var day = 0; day < 7; day++) {
+        week.addAll(CommunityPrompt.subjectsFor(day, 3));
+      }
+      expect(week.length, greaterThanOrEqualTo(20));
+    });
+
+    test('the subjects reach the prompt, numbered', () {
+      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 5);
+      for (final subject in CommunityPrompt.subjectsFor(5, 3)) {
+        expect(task, contains(subject));
+      }
+      expect(task, contains('1. '));
+      expect(task, contains('THE GROUND FOR THIS BATCH'));
+    });
+
+    test('the worked example that got copied verbatim is gone', () {
+      // Every generation returned a variant of the hidden-account story
+      // because the prompt handed it one to copy.
+      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
+      expect(task, isNot(contains('200 dollars a month')));
+      expect(task, contains('Do not reuse an example'));
+    });
+
+    test('asking for more than exists does not crash or repeat', () {
+      final huge = CommunityPrompt.subjectsFor(3, 500);
+      expect(huge.length, CommunityPrompt.subjects.length);
+      expect(huge.toSet().length, huge.length);
+    });
+
+    test('zero and negative counts are empty, not an error', () {
+      expect(CommunityPrompt.subjectsFor(1, 0), isEmpty);
+      expect(CommunityPrompt.subjectsFor(1, -3), isEmpty);
+    });
+  });
+
+  group('a curated story is the panel\'s, not the device\'s', () {
+    test('curated is decided by the id the panel assigns', () {
+      final curated = CommunityPost.fromGenerated(_post(),
+          id: 'curated-abc', createdAt: DateTime.now());
+      final generated = CommunityPost.fromGenerated(_post(),
+          id: 'k3f9-0', createdAt: DateTime.now());
+      expect(curated.curated, isTrue);
+      expect(generated.curated, isFalse);
+    });
+
+    test('curated survives a storage round trip', () async {
+      SharedPreferences.setMockInitialValues({});
+      await StorageService.instance.init();
+      final post = CommunityPost.fromGenerated(_post(),
+          id: 'curated-xyz', createdAt: DateTime(2026, 9, 8));
+      await StorageService.instance.saveCommunityPosts([post]);
+      expect(StorageService.instance.loadCommunityPosts().first.curated, isTrue);
     });
   });
 
@@ -278,7 +351,7 @@ void main() {
 
     test('the prompt forbids the single-prayer fix and demands outside help',
         () {
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3);
+      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
       expect(task, contains('single prayer'));
       expect(task.toLowerCase(), contains('counsellor'));
       expect(task, contains('fromAuthor'));
@@ -287,13 +360,13 @@ void main() {
     test('the prompt carries the couple\'s own struggles when there are any',
         () {
       final task = CommunityPrompt.task(
-          memoryBlock: 'They argue about her mother.', count: 3);
+          memoryBlock: 'They argue about her mother.', count: 3, dayIndex: 0);
       expect(task, contains('They argue about her mother.'));
     });
 
     test('the prompt keeps the stories at arm\'s length', () {
       final task = CommunityPrompt.task(
-          memoryBlock: 'They argue about her mother.', count: 3);
+          memoryBlock: 'They argue about her mother.', count: 3, dayIndex: 0);
       expect(task, contains('DO NOT WRITE THEIR LIFE BACK TO THEM'));
       expect(task, contains('half-recognisable'));
       // A feed that only mirrors them is not a group.

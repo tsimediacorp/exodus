@@ -72,6 +72,14 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     letterSpacing: -0.3,
                   )),
               const SizedBox(height: 18),
+              // A failure used to be visible only when the feed was empty,
+              // which it never is once the offline stories land. That is how
+              // "nothing new today" and "generation has been broken for a
+              // week" came to look identical.
+              if (_service.lastError != null && posts.isNotEmpty) ...[
+                _problem(_service.lastError!),
+                const SizedBox(height: 14),
+              ],
               if (_tags.length > 1) _filters(),
               if (_tags.length > 1) const SizedBox(height: 16),
               if (_service.isWorking && posts.isEmpty)
@@ -229,6 +237,46 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
+  Widget _problem(String message) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: ExodusTheme.crimson.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ExodusTheme.crimson.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              size: 17, color: ExodusTheme.crimson),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('No new stories today. $message',
+                    style: const TextStyle(
+                        color: ExodusTheme.porcelain,
+                        fontSize: 13.5,
+                        height: 1.5)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => _service.ensureFresh(force: true),
+                  child: const Text('Try again',
+                      style: TextStyle(
+                          color: ExodusTheme.brass,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _working() {
     return const Padding(
       padding: EdgeInsets.only(top: 40),
@@ -262,7 +310,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
           ),
           const SizedBox(height: 16),
           TextButton(
-            onPressed: () => _service.ensureFresh(),
+            onPressed: () => _service.ensureFresh(force: true),
             child: const Text('Try again',
                 style: TextStyle(color: ExodusTheme.brass)),
           ),
