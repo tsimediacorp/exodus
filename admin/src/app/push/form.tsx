@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Device } from '@/lib/devices';
 
 export function PushForm({ devices, canSend }: { devices: Device[]; canSend: boolean }) {
+  const router = useRouter();
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [payload, setPayload] = useState('');
@@ -27,6 +29,14 @@ export function PushForm({ devices, canSend }: { devices: Device[]; canSend: boo
             (body.failed ? `, ${body.failed} failed: ${(body.errors ?? []).join('; ')}` : '.')
         : body.error ?? 'Send failed.',
     );
+  }
+
+  async function forget(deviceId: string) {
+    await fetch(`/api/admin/devices?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: 'DELETE',
+    });
+    setSelected((current) => current.filter((x) => x !== deviceId));
+    router.refresh();
   }
 
   const toggle = (id: string) =>
@@ -75,7 +85,10 @@ export function PushForm({ devices, canSend }: { devices: Device[]; canSend: boo
         ) : (
           <table>
             <thead>
-              <tr><th></th><th>Device</th><th>User</th><th>Build</th><th>Last seen</th></tr>
+              <tr>
+                <th></th><th>Device</th><th>User</th><th>Build</th>
+                <th>Last seen</th><th></th>
+              </tr>
             </thead>
             <tbody>
               {devices.map((device) => (
@@ -91,6 +104,11 @@ export function PushForm({ devices, canSend }: { devices: Device[]; canSend: boo
                   <td className="muted">{device.userId || '—'}</td>
                   <td><code>{device.build || '—'}</code></td>
                   <td className="muted">{new Date(device.lastSeen).toLocaleString()}</td>
+                  <td>
+                    <button className="ghost" onClick={() => forget(device.deviceId)}>
+                      Forget
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
