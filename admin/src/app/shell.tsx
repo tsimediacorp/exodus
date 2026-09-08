@@ -6,6 +6,7 @@ import Link from 'next/link';
 const NAV = [
   { href: '/', label: 'Overview' },
   { href: '/releases', label: 'Force update' },
+  { href: '/push', label: 'Push' },
   { href: '/flags', label: 'Flags & A/B' },
   { href: '/users', label: 'Testers' },
 ];

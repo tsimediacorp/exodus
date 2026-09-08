@@ -25,12 +25,20 @@ class NotificationService {
   /// open Counsel on that specific follow-up.
   final ValueNotifier<String?> openCheckInRequested = ValueNotifier(null);
 
+  /// A conversation id to open, set when a tap should land on a specific
+  /// thread rather than a tab.
+  final ValueNotifier<String?> openConversationRequested = ValueNotifier(null);
+
   /// Payload prefixes. Every notification must carry one: without a payload
   /// there is no way to tell what was tapped, and this used to send EVERY tap
   /// to the Devotional tab — including, once check-ins started arriving, taps
   /// on a follow-up about something else entirely.
   static const String _devotionalPayload = 'devotional';
   static const String _checkInPayload = 'checkin:';
+
+  /// A message the admin panel placed in a conversation. Beta scaffolding;
+  /// it routes to Counsel on that thread.
+  static const String chatPayload = 'chat:';
 
   void _route(String? payload) {
     if (payload == null || payload == _devotionalPayload) {
@@ -39,7 +47,49 @@ class NotificationService {
     }
     if (payload.startsWith(_checkInPayload)) {
       openCheckInRequested.value = payload.substring(_checkInPayload.length);
+      return;
     }
+    if (payload.startsWith(chatPayload)) {
+      openConversationRequested.value = payload.substring(chatPayload.length);
+    }
+  }
+
+  /// Route a tap that arrived over FCM rather than from a local notification.
+  ///
+  /// Deliberately the same door: there is one place that decides where a tap
+  /// lands, so a remote push and a scheduled reminder can never disagree about
+  /// what "checkin:abc" means.
+  void routeFromPush(String payload) => _route(payload);
+
+  /// Show a notification immediately.
+  ///
+  /// Needed because Android does not draw a system notification for a push
+  /// that arrives while the app is in the foreground. Without this, an admin
+  /// push sent to someone actively using the app silently vanishes, which
+  /// looks from the panel like a failed send.
+  Future<void> deliverNow({
+    required String title,
+    required String body,
+    String payload = '',
+  }) async {
+    if (!_ready) return;
+    await _plugin.show(
+      // A distinct id per notification so several do not overwrite each other.
+      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      title,
+      body,
+      const NotificationDetails(
+        iOS: DarwinNotificationDetails(),
+        android: AndroidNotificationDetails(
+          'exodus',
+          'From EXODUS',
+          channelDescription: 'Messages and reminders from EXODUS',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+      payload: payload,
+    );
   }
 
   Future<void> init() async {

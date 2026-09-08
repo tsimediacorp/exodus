@@ -62,8 +62,8 @@ describe('A/B assignment', () => {
   });
 
   test('changing the salt reshuffles', () => {
-    const before = [];
-    const after = [];
+    const before: string[] = [];
+    const after: string[] = [];
     for (let i = 0; i < 200; i++) {
       before.push(groupFor(`u${i}`, 'salt-one', 50));
       after.push(groupFor(`u${i}`, 'salt-two', 50));

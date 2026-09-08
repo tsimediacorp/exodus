@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "471356238757",
+    "project_id": "exodus-tsi",
+    "storage_bucket": "exodus-tsi.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:471356238757:android:140f975925937bc7ba564c",
+        "android_client_info": {
+          "package_name": "com.dreamviz.exodus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYhbVjg639bTuFajigNitLfkxJlE4bcDE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

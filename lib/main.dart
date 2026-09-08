@@ -8,6 +8,7 @@ import 'services/amplify_service.dart';
 import 'services/card_backgrounds.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
+import 'services/push_service.dart';
 import 'services/remote_config.dart';
 import 'services/storage_service.dart';
 import 'theme/exodus_theme.dart';
@@ -84,6 +85,11 @@ Future<void> main() async {
     // here may hold the first frame hostage.
     await RemoteConfig.instance.loadCached();
     unawaited(RemoteConfig.instance.refresh());
+
+    // Register for remote push, so the panel can reach this device. Fire and
+    // forget: a phone that cannot register is a phone that misses admin
+    // pushes, not one that fails to start.
+    unawaited(PushService.instance.start());
 
     // Couples-in-Sync backend. Best-effort: the local-first app works without
     // it, so a slow network must not hold the first frame hostage.

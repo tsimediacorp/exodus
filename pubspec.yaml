@@ -1,7 +1,7 @@
 name: exodus
 description: God's design. Unfiltered. Bible-based AI counsel for young couples.
 publish_to: 'none'
-version: 0.1.0+46
+version: 0.1.0+47
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -20,6 +20,11 @@ dependencies:
   image_picker: ^1.1.2
   flutter_webrtc: ^0.12.5
   flutter_local_notifications: ^18.0.1
+  # Remote push. flutter_local_notifications only SCHEDULES on the device; it
+  # cannot receive anything a server sends, which is why nothing could reach a
+  # phone before this.
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
   timezone: ^0.9.4
   # 1.0.8 still referenced PluginRegistry.Registrar (the v1 Android embedding),
   # which no longer exists in the engine — it fails to compile on Android at all.
