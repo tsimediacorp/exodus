@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/memory_item.dart';
 import '../services/memory_store.dart';
+import '../services/analytics.dart';
 import '../theme/exodus_theme.dart';
 
 /// Lets the couple see, edit, add, and delete what EXODUS remembers about them.
@@ -131,6 +132,7 @@ class MemoryScreen extends StatelessWidget {
       ),
     );
     if (result == null || result.isEmpty) return;
+    Analytics.instance.track(Events.memoryEdit);
     if (existing == null) {
       await MemoryStore.instance.addManual(result);
     } else {

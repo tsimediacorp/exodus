@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/remote_config.dart';
+import '../services/analytics.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/arrival.dart';
 import '../widgets/page_backdrop.dart';
@@ -106,8 +107,11 @@ class LibraryScreen extends StatelessWidget {
       Widget page) {
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => page)),
+      onTap: () {
+        // The one the A/B split is actually asking about.
+        if (page is MemoryScreen) Analytics.instance.track(Events.memoryOpen);
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+      },
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

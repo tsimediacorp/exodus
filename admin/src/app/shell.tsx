@@ -8,6 +8,7 @@ const NAV = [
   { href: '/releases', label: 'Force update' },
   { href: '/push', label: 'Push' },
   { href: '/chats', label: 'Chats & memory' },
+  { href: '/analytics', label: 'Analytics' },
   { href: '/flags', label: 'Flags & A/B' },
   { href: '/users', label: 'Testers' },
 ];

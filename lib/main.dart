@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/splash_screen.dart';
 import 'screens/update_required_screen.dart';
 import 'services/amplify_service.dart';
+import 'services/analytics.dart';
 import 'services/card_backgrounds.dart';
 import 'services/debug_sync.dart';
 import 'services/memory_store.dart';
@@ -96,6 +97,11 @@ Future<void> main() async {
     // anything queued for it. Does nothing at all in a build with no
     // EXODUS_ADMIN_URL compiled in, which is what a launch build is.
     unawaited(DebugSync.instance.run());
+
+    // Counts only, never content. This is what makes the A/B split
+    // able to answer something rather than just divide people.
+    unawaited(Analytics.instance.track(Events.appOpen)
+        .then((_) => Analytics.instance.flush()));
 
     // Couples-in-Sync backend. Best-effort: the local-first app works without
     // it, so a slow network must not hold the first frame hostage.

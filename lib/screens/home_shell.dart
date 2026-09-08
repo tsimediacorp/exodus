@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/notification_service.dart';
+import '../services/analytics.dart';
 import '../widgets/exodus_bottom_nav.dart';
 import '../widgets/notification_primer.dart';
 import 'chat_screen.dart';
@@ -136,7 +137,18 @@ class _HomeShellState extends State<HomeShell> {
     ));
   }
 
-  void _goToMode(int mode) => setState(() => _index = _modeBase + mode);
+  void _goToMode(int mode) {
+    // One call site rather than one per screen: modes are opened from several
+    // places, and instrumenting each would double-count some and miss others.
+    const events = {
+      1: Events.coachingStart,
+      2: Events.devotionalOpen,
+      3: Events.studyOpen,
+    };
+    final event = events[mode];
+    if (event != null) Analytics.instance.track(event);
+    setState(() => _index = _modeBase + mode);
+  }
 
   void _goToTab(int tab) {
     setState(() => _index = tab);

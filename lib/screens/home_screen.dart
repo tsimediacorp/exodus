@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/conversation.dart';
 import '../services/bible_service.dart';
+import '../services/analytics.dart';
 import '../services/daily_verse.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
@@ -208,7 +209,10 @@ class HomeScreenState extends State<HomeScreen> {
       label: 'Open $reference in the Bible',
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => openScriptureRef(context, reference),
+        onTap: () {
+          Analytics.instance.track(Events.verseOpen);
+          openScriptureRef(context, reference);
+        },
         child: Container(
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(

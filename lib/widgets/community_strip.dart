@@ -5,6 +5,7 @@ import '../models/community_post.dart';
 import '../screens/community_screen.dart';
 import '../screens/community_thread_screen.dart';
 import '../services/community_service.dart';
+import '../services/analytics.dart';
 import '../theme/exodus_theme.dart';
 import 'community_bits.dart';
 
@@ -161,9 +162,12 @@ class _CommunityStripState extends State<CommunityStrip> {
       width: 250,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => CommunityThreadScreen(post: post),
-        )),
+        onTap: () {
+          Analytics.instance.track(Events.communityThreadOpen);
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => CommunityThreadScreen(post: post),
+          ));
+        },
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(

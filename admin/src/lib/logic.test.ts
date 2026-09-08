@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { groupFor, bucket } from './ab.ts';
 import { evaluate } from './version.ts';
 import { normalize, DEFAULT_CONFIG } from './config.ts';
+import { combine, perDevice, type DayStats } from './stats-shape.ts';
 
 describe('who gets locked out', () => {
   test('a build below the minimum is blocked', () => {
@@ -107,5 +108,56 @@ describe('a stored config that is missing pieces still boots', () => {
 
   test('a build number stored as a string still gates', () => {
     assert.equal(normalize({ releases: { android: { minBuild: '45' } } }).releases.android.minBuild, 45);
+  });
+});
+
+describe('rolling up counts', () => {
+  const day = (over: Partial<DayStats>): DayStats => ({
+    day: '2026-09-07',
+    totals: {},
+    byGroup: { A: {}, B: {} },
+    devices: [],
+    devicesByGroup: { A: [], B: [] },
+    ...over,
+  });
+
+  test('days add together without double-counting a device', () => {
+    const merged = combine([
+      day({ totals: { app_open: 3 }, devices: ['d1', 'd2'] }),
+      day({ totals: { app_open: 2, memory_open: 1 }, devices: ['d2', 'd3'] }),
+    ]);
+    assert.equal(merged.totals.app_open, 5);
+    assert.equal(merged.totals.memory_open, 1);
+    assert.deepEqual(merged.devices.sort(), ['d1', 'd2', 'd3']);
+  });
+
+  test('groups stay separate through a merge', () => {
+    const merged = combine([
+      day({ byGroup: { A: { memory_open: 4 }, B: { memory_open: 1 } },
+            devicesByGroup: { A: ['a1'], B: ['b1'] } }),
+      day({ byGroup: { A: { memory_open: 2 }, B: {} },
+            devicesByGroup: { A: ['a1', 'a2'], B: ['b1'] } }),
+    ]);
+    assert.equal(merged.byGroup.A.memory_open, 6);
+    assert.equal(merged.byGroup.B.memory_open, 1);
+    assert.deepEqual(merged.devicesByGroup.A.sort(), ['a1', 'a2']);
+    assert.deepEqual(merged.devicesByGroup.B, ['b1']);
+  });
+
+  test('a day with nothing in it does not break the merge', () => {
+    assert.doesNotThrow(() => combine([day({}), day({})]));
+    assert.deepEqual(combine([]).totals, {});
+  });
+
+  test('per-device is an average, not a total', () => {
+    // The whole point: 9 opens across 9 testers is not better engagement than
+    // 4 across 3.
+    assert.equal(perDevice(9, 9), '1.0');
+    assert.equal(perDevice(4, 3), '1.3');
+  });
+
+  test('no devices reads as unknown rather than zero', () => {
+    assert.equal(perDevice(0, 0), '—');
+    assert.equal(perDevice(5, 0), '—');
   });
 });

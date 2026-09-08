@@ -7,6 +7,7 @@ import '../models/chat_message.dart';
 import '../models/check_in.dart';
 import '../models/conversation.dart';
 import '../services/ai_service.dart';
+import '../services/analytics.dart';
 import '../services/check_in_service.dart';
 import '../config/presence_prompt.dart';
 import '../services/conversation_search.dart';
@@ -415,6 +416,9 @@ class ChatScreenState extends State<ChatScreen> {
     final content = (overridePrompt ?? text ?? _input.text).trim();
     // Allow sending with images only (no text), but never an empty message.
     if ((content.isEmpty && _pendingImages.isEmpty) || _sending) return;
+
+    // Counted after the guard, so an empty tap is not a message.
+    Analytics.instance.track(Events.counselMessage);
 
     // Create-on-first-message: avoids empty "New conversation" entries in history.
     if (_current == null) {
