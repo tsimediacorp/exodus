@@ -5,6 +5,7 @@ import '../theme/exodus_theme.dart';
 import '../widgets/arrival.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/page_backdrop.dart';
+import 'custom_instructions_screen.dart';
 import 'settings_screen.dart';
 
 /// The account and the state of things.
@@ -61,6 +62,15 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   _row(context, Icons.favorite_rounded, 'Together',
                       'Pair with your spouse', onOpenTogether),
+                  const SizedBox(height: 10),
+                  _row(
+                    context,
+                    Icons.tune_rounded,
+                    'Custom instructions',
+                    'Tell EXODUS once how to speak to you',
+                    () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const CustomInstructionsScreen())),
+                  ),
                   const SizedBox(height: 10),
                   _row(
                     context,

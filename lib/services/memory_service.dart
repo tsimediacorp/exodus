@@ -11,14 +11,54 @@ class MemoryService {
   final AiService _ai = AiService();
 
   static const _instruction = '''
-Our conversation is ending. Review it and extract any NEW, durable facts about
-this couple worth remembering for future conversations — names, relationship
-dynamics, recurring struggles, goals, prayer requests, milestones, decisions.
-Ignore small talk and anything already known.
+Review this conversation and extract anything NEW and durable about this couple
+worth holding on to for future conversations.
 
-Return ONLY a JSON array of short plain-text strings (each a single fact).
-If there is nothing new worth remembering, return [].
+Two kinds of thing:
+
+1. FACTS about their life: names, how long they have been together, children,
+   relationship dynamics, recurring struggles, goals, prayer requests,
+   milestones, decisions they made.
+
+2. PREFERENCES: anything they asked of YOU. What to call them, how long or
+   short to be, a tone they want or do not want, something to stop doing,
+   something to always do, a translation they read, a subject to leave alone.
+   Start each of these with "Preference: " and write it as an instruction you
+   could follow, e.g. "Preference: Keep answers to a few sentences unless
+   asked for more." If they said "remember" or "from now on", it belongs
+   here or above, always.
+
+Ignore small talk and anything you already know. One short plain-text line
+per item.
+
+Return ONLY a JSON array of strings. If there is nothing new, return [].
 ''';
+
+  /// Whether [message] asks for something to be kept.
+  ///
+  /// Memory was only ever distilled when a conversation was LEFT. A couple who
+  /// said "remember that" and carried on in the same thread, or closed the
+  /// app from inside it, never had it saved at all, and found out the next
+  /// day. A message that matches this is captured as soon as it is answered.
+  static bool asksToRemember(String message) {
+    final m = message.toLowerCase();
+    return _rememberCues.any((cue) => cue.hasMatch(m));
+  }
+
+  static final List<RegExp> _rememberCues = [
+    RegExp(r"\bremember\b"),
+    RegExp(r"\bdon'?t forget\b"),
+    RegExp(r"\bfrom now on\b"),
+    RegExp(r"\bgoing forward\b"),
+    RegExp(r"\bin (the )?future\b"),
+    RegExp(r"\b(always|never)\b.{0,40}\b(call|say|use|quote|give|ask|tell|end|start|mention|bring)\b"),
+    RegExp(r"\b(stop|quit)\b.{0,30}\b(calling|saying|using|quoting|giving|asking|telling|ending|starting|mentioning|bringing)\b"),
+    RegExp(r"\bcall (me|us|her|him)\b"),
+    RegExp(r"\b(i|we) (prefer|would rather|want you to|need you to)\b"),
+    RegExp(r"\bkeep (it|your (answers|replies|responses))\b"),
+    RegExp(r"\bmy name is\b"),
+    RegExp(r"\b(i|we) told you\b"),
+  ];
 
   /// Fire-and-forget capture that owns its own client and closes it when the
   /// request finishes. Use this when the caller is about to be disposed (e.g.

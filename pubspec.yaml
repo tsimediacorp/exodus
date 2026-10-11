@@ -1,7 +1,7 @@
 name: exodus
 description: God's design. Unfiltered. Bible-based AI counsel for young couples.
 publish_to: 'none'
-version: 0.1.0+50
+version: 0.1.0+51
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -34,6 +34,9 @@ dependencies:
   amplify_api: ^2.6.0
   cupertino_icons: ^1.0.6
   share_plus: ^13.3.0
+  # Voice input. Records the clip that is then transcribed; the platform's
+  # own live dictation stops at the first pause and mangles references.
+  record: ^7.1.2
 
 dev_dependencies:
   flutter_test:

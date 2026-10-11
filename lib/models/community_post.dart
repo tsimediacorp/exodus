@@ -160,6 +160,33 @@ class CommunityPost {
       replies.where((r) => r.isUsable).length >= 2;
 
   int get replyCount => replies.length;
+
+  /// The same post at a different time, with its replies carried along at the
+  /// same distance behind it.
+  CommunityPost movedTo(DateTime when) {
+    final shift = when.difference(createdAt);
+    return CommunityPost(
+      id: id,
+      author: author,
+      authorContext: authorContext,
+      tag: tag,
+      title: title,
+      body: body,
+      composite: composite,
+      read: read,
+      createdAt: when,
+      replies: [
+        for (final r in replies)
+          CommunityReply(
+            id: r.id,
+            author: r.author,
+            body: r.body,
+            fromAuthor: r.fromAuthor,
+            createdAt: r.createdAt.add(shift),
+          ),
+      ],
+    );
+  }
 }
 
 /// One reply in a thread.

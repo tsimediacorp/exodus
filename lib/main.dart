@@ -7,6 +7,7 @@ import 'screens/update_required_screen.dart';
 import 'services/amplify_service.dart';
 import 'services/analytics.dart';
 import 'services/card_backgrounds.dart';
+import 'services/custom_instructions.dart';
 import 'services/debug_sync.dart';
 import 'services/memory_store.dart';
 import 'services/notification_service.dart';
@@ -14,6 +15,7 @@ import 'services/push_service.dart';
 import 'services/remote_config.dart';
 import 'services/storage_service.dart';
 import 'theme/exodus_theme.dart';
+import 'widgets/keyboard_inset_guard.dart';
 
 /// Holds the last fatal startup error so we can render it on screen instead
 /// of showing a blank white view.
@@ -50,6 +52,7 @@ Future<void> main() async {
     try {
       await StorageService.instance.init();
       MemoryStore.instance.load();
+      CustomInstructions.instance.load();
     } catch (e, st) {
       // Don't crash to white — capture it so we can see what happened.
       _startupError = 'Storage init failed:\n$e\n\n$st';
@@ -146,6 +149,10 @@ class ExodusApp extends StatelessWidget {
       title: 'EXODUS',
       debugShowCheckedModeBanner: false,
       theme: ExodusTheme.build(),
+      // Above every route, so no screen can be left squeezed by a keyboard
+      // inset that outlived the keyboard.
+      builder: (context, child) =>
+          KeyboardInsetGuard(child: child ?? const SizedBox.shrink()),
       home: err != null
           ? _ErrorView(message: err)
           // A build below the minimum never reaches the app. Checked here

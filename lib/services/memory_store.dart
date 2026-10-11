@@ -38,7 +38,7 @@ class MemoryStore extends ChangeNotifier {
       s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]'), '').trim();
 
   /// Merge freshly-extracted facts, skipping near-duplicates and trimming to
-  /// the cap (oldest first when over).
+  /// the cap.
   Future<void> addMany(Iterable<String> texts, String source) async {
     var changed = false;
     for (final t in texts) {
@@ -47,16 +47,33 @@ class MemoryStore extends ChangeNotifier {
       _items.add(MemoryItem.create(text, source));
       changed = true;
     }
-    if (_items.length > maxItems) {
-      _items.removeRange(0, _items.length - maxItems);
+    if (_trim()) changed = true;
+    if (changed) await _persist();
+  }
+
+  /// Drop the oldest LEARNED facts until the list fits.
+  ///
+  /// This used to remove from the front regardless of where a line came from,
+  /// so the first thing a couple ever typed in by hand was also the first
+  /// thing forgotten once EXODUS had inferred sixty others. Anything they
+  /// wrote themselves, and any stated preference, now outlives anything
+  /// inferred.
+  bool _trim() {
+    var changed = false;
+    while (_items.length > maxItems) {
+      var at = _items.indexWhere((m) => !m.pinned && !m.isPreference);
+      if (at < 0) at = _items.indexWhere((m) => !m.pinned);
+      if (at < 0) at = 0;
+      _items.removeAt(at);
       changed = true;
     }
-    if (changed) await _persist();
+    return changed;
   }
 
   Future<void> addManual(String text) async {
     if (text.trim().isEmpty) return;
     _items.add(MemoryItem.create(text.trim(), 'manual'));
+    _trim();
     await _persist();
   }
 
@@ -98,19 +115,62 @@ class MemoryStore extends ChangeNotifier {
 
   /// The block injected into prompts. Empty string when there's nothing yet,
   /// so callers can append unconditionally.
+  ///
+  /// The wording matters more than it looks. This used to say "don't bring it
+  /// up unprompted, let it inform you naturally", and the model took that at
+  /// its word: it asked for names it had been given and offered advice that
+  /// contradicted what it had been told. A memory that is optional to use is
+  /// one that gets ignored, so these are stated as facts to hold to, and
+  /// anything recording how the couple wants to be treated is stated as an
+  /// instruction.
   String promptBlock() {
     if (_items.isEmpty) return '';
-    final lines = _items.map((m) => '- ${m.text}').join('\n');
-    return '''
+
+    String lines(Iterable<MemoryItem> items) =>
+        items.map((m) => '- ${m.text}').join('\n');
+
+    final preferences = _items.where((m) => m.isPreference).toList();
+    final told =
+        _items.where((m) => m.pinned && !m.isPreference).toList();
+    final learned =
+        _items.where((m) => !m.pinned && !m.isPreference).toList();
+
+    final b = StringBuffer('''
 
 # ============================================================
-# WHAT YOU REMEMBER ABOUT THIS COUPLE
-# Durable context gathered from past conversations. Use it to personalize
-# your counsel, coaching, and devotionals. Don't recite it back verbatim or
-# bring it up unprompted — let it inform you naturally.
+# WHAT YOU KNOW ABOUT THIS COUPLE
+# Everything below is established and current. You are not meeting them for
+# the first time.
 # ============================================================
-$lines
-''';
+''');
+    if (told.isNotEmpty) {
+      b.writeln('They told you these directly and asked you to remember:');
+      b.writeln(lines(told));
+      b.writeln();
+    }
+    if (learned.isNotEmpty) {
+      b.writeln('You learned these from earlier conversations:');
+      b.writeln(lines(learned));
+      b.writeln();
+    }
+    if (preferences.isNotEmpty) {
+      b.writeln('How they have asked you to treat them. These are standing '
+          'instructions, not suggestions:');
+      b.writeln(lines(preferences));
+      b.writeln();
+    }
+    b.write('''
+HOW TO USE THIS
+- Hold every line as true. Never contradict one, and never give counsel that
+  only makes sense if you had forgotten one.
+- Never ask for something already answered here. Use the names, the history
+  and the circumstances the way someone who knows them would.
+- When what they are asking touches something here, connect it. That is the
+  difference between counsel for them and counsel for anyone.
+- If they tell you something that changes a line, the new thing is true.
+- Do not recite this list, and do not announce that you remember.
+''');
+    return b.toString();
   }
 }
 

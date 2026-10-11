@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/master_prompt.dart';
 import '../config/api_keys.dart';
 import '../models/chat_message.dart';
+import 'custom_instructions.dart';
 import 'memory_store.dart';
 import 'progress.dart';
 
@@ -62,8 +64,13 @@ class AiService {
         'X-Title': 'EXODUS',
       },
     };
-    final body = jsonEncode(_buildBody(userMessage, history,
-        stream: true, images: images, systemExtra: systemExtra));
+    final body = jsonEncode(buildBody(userMessage, history,
+        stream: true,
+        images: images,
+        systemExtra: systemExtra,
+        // A streamed call is a conversation, so the couple's instructions are
+        // restated beside the newest message as well as in the system prompt.
+        conversational: true));
 
     // Resilient streaming: retry transient failures (dropped handshake, socket
     // close, mid-receive "Connection closed while receiving data", timeout) as
@@ -177,6 +184,11 @@ class AiService {
     /// What to say while the model is composing. The caller knows what it
     /// asked for ("Writing today's devotional…"), so it words this.
     String workingMessage = 'Thinking…',
+
+    /// Whether the couple's custom instructions apply. On for everything
+    /// EXODUS says to them in its own voice. Off where the output is not
+    /// EXODUS speaking to them at all, so "call me Dani" cannot leak into it.
+    bool customInstructions = true,
   }) async {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -194,8 +206,11 @@ class AiService {
         'X-Title': 'EXODUS',
       },
     };
-    final body = jsonEncode(_buildBody(userMessage, history,
-        stream: false, images: images, maxTokens: maxTokens));
+    final body = jsonEncode(buildBody(userMessage, history,
+        stream: false,
+        images: images,
+        maxTokens: maxTokens,
+        customInstructions: customInstructions));
 
     // Hard timeout (no infinite hang) + retry on transient network/TLS errors.
     http.Response response;
@@ -247,13 +262,23 @@ class AiService {
     return content is String ? content : '';
   }
 
-  Map<String, dynamic> _buildBody(
+  /// The request body.
+  ///
+  /// The system prompt is assembled in order of increasing authority, because
+  /// that is the order a model weighs it in: who EXODUS is, what it knows
+  /// about this couple, anything specific to this call, and last the
+  /// instructions the couple wrote themselves. Those used to be memory lines
+  /// buried in the middle, which is why they lost to the default style.
+  @visibleForTesting
+  Map<String, dynamic> buildBody(
     String userMessage,
     List<ChatMessage> history, {
     String systemExtra = '',
     required bool stream,
     List<String> images = const [],
     int? maxTokens,
+    bool conversational = false,
+    bool customInstructions = true,
   }) {
     // Build the current user turn. With attachments it uses the multimodal
     // parts array (text + image_url blocks); without, a plain string.
@@ -269,17 +294,32 @@ class AiService {
               },
           ];
 
+    final instructions = CustomInstructions.instance;
+    final past = history
+        .where((m) =>
+            !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))
+        .map((m) => m.toApiFormat())
+        .toList();
+
+    // An instruction given once at the top of a thread is followed for a few
+    // turns and then quietly dropped. Restating it immediately before the
+    // message being answered is what keeps reply forty obeying it.
+    final reminder = conversational && customInstructions && past.isNotEmpty
+        ? instructions.reminder()
+        : '';
+
     final messages = <Map<String, dynamic>>[
       {
         'role': 'system',
         'content': MasterPrompt.build() +
             MemoryStore.instance.promptBlock() +
-            systemExtra
+            systemExtra +
+            (customInstructions
+                ? instructions.promptBlock(shaped: !conversational)
+                : '')
       },
-      ...history
-          .where((m) =>
-              !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))
-          .map((m) => m.toApiFormat()),
+      ...past,
+      if (reminder.isNotEmpty) {'role': 'system', 'content': reminder},
       {'role': 'user', 'content': currentContent},
     ];
 

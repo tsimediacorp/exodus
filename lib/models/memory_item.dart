@@ -7,6 +7,17 @@ class MemoryItem {
   /// Where it came from: 'chat', 'coaching', 'devotional', or 'manual'.
   final String source;
 
+  /// Something they typed in themselves, rather than something EXODUS inferred.
+  /// These are never trimmed to make room and are stated first in the prompt.
+  bool get pinned => source == 'manual' || source == 'admin';
+
+  /// A request about how to treat them ("call me Dani", "no long prayers")
+  /// rather than a fact about their life.
+  bool get isPreference =>
+      text.toLowerCase().startsWith(preferencePrefix.toLowerCase());
+
+  static const String preferencePrefix = 'Preference:';
+
   MemoryItem({
     required this.id,
     required this.text,
