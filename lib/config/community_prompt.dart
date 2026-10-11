@@ -57,39 +57,124 @@ class CommunityPrompt {
     ];
   }
 
+  /// Words that place a line of memory on one of [subjects], by index.
+  ///
+  /// This is the ONLY thing the feed takes from what a couple has told EXODUS:
+  /// which of twenty-four broad subjects their life touches. The model that
+  /// writes the stories is never shown the memory itself. It used to be handed
+  /// the whole of it with an instruction not to write it back, and wrote it
+  /// back anyway — the mother-in-law, the amount, the room. A model cannot
+  /// reproduce a detail it was never given.
+  static const Map<int, List<String>> _cues = {
+    0: ['money', 'debt', 'budget', 'spend', 'financ', 'bills', 'tith', 'loan'],
+    1: ['in-law', 'in law', 'his mother', 'her mother', 'his mom', 'her mom',
+        'his parents', 'her parents'],
+    2: ['rebel', 'teenage', 'prodigal'],
+    3: ['unseen', 'invisible', 'ignored', 'unappreciated', 'taken for granted',
+        'lonely', 'alone'],
+    4: ['resent', 'bitter', 'grudge'],
+    5: ['unbeliev', 'not a believer', 'lukewarm', 'doubt'],
+    6: ['exhaust', 'tired', 'burnout', 'burned out', 'overwhelm', 'newborn'],
+    7: ['intimacy', 'sex', 'affection', 'libido', 'porn', 'lust'],
+    8: ['grief', 'griev', 'miscarriage', 'died', 'passed away', 'funeral'],
+    9: ['anger', 'angry', 'temper', 'yell', 'shout', 'rage'],
+    10: ['jealous', 'envy', 'envious'],
+    11: ['work', 'job', 'shift', 'overtime', 'career', 'boss'],
+    12: ['addict', 'alcohol', 'drinking', 'sober', 'recovery', 'gambl'],
+    13: ['illness', 'sick', 'diagnos', 'cancer', 'chronic', 'depress',
+        'anxiety', 'surgery'],
+    14: ['stepson', 'stepdaughter', 'stepchild', 'blended', 'custody'],
+    15: ['infertil', 'conceive', 'pregnan', 'ivf'],
+    16: ['moved', 'moving', 'relocat'],
+    17: ['friend'],
+    18: ['lied', 'lying', 'betray', 'secret'],
+    19: ['unanswered', 'no answer', 'waiting on god'],
+    20: ['inherit', 'windfall', 'promotion', 'bonus'],
+    21: ['caregiv', 'caring for', 'elderly', 'dementia', 'nursing home'],
+    22: ['forgiv', 'affair', 'cheat', 'unfaithful', 'infidel'],
+    23: ['silent', 'silence', 'distant', 'distance', 'roommate', 'stonewall'],
+  };
+
+  /// Which subjects [memory] touches, most-mentioned first.
+  static List<int> themesIn(String memory) {
+    final text = memory.toLowerCase();
+    if (text.trim().isEmpty) return const [];
+    final hits = <int, int>{};
+    _cues.forEach((subject, words) {
+      var count = 0;
+      for (final word in words) {
+        count += RegExp('\\b${RegExp.escape(word)}').allMatches(text).length;
+      }
+      if (count > 0) hits[subject] = count;
+    });
+    final found = hits.keys.toList()
+      ..sort((a, b) {
+        final byCount = hits[b]!.compareTo(hits[a]!);
+        return byCount != 0 ? byCount : a.compareTo(b);
+      });
+    return found;
+  }
+
+  /// The subjects for one batch: mostly other people's lives, sometimes one
+  /// that is near the couple's own.
+  ///
+  /// A real group is full of people whose problems are not yours. So the
+  /// batch is the day's rotation with the couple's own [themes] taken OUT of
+  /// it, and then at most about a third put back deliberately. A couple with
+  /// one thing on their mind does not get a story about it every day either:
+  /// the fewer themes there are, the less often one comes round, because the
+  /// same subject turning up daily is as conspicuous as the same story.
+  static List<String> groundFor({
+    required int dayIndex,
+    required int count,
+    List<int> themes = const [],
+  }) {
+    if (count <= 0) return const [];
+    final size = count < subjects.length ? count : subjects.length;
+    final near = themes.where((t) => t >= 0 && t < subjects.length).toList();
+
+    // The rotation, skipping the couple's own ground.
+    final picked = <int>[];
+    final start = (dayIndex * count) % subjects.length;
+    for (var i = 0; picked.length < size && i < subjects.length; i++) {
+      final at = (start + i) % subjects.length;
+      if (!near.contains(at)) picked.add(at);
+    }
+    // Everything is their ground: fall back to the plain rotation.
+    for (var i = 0; picked.length < size && i < subjects.length; i++) {
+      final at = (start + i) % subjects.length;
+      if (!picked.contains(at)) picked.add(at);
+    }
+
+    final due = near.isNotEmpty &&
+        (count >= 5 || near.length >= 3 || dayIndex % (4 - near.length) == 0);
+    if (due) {
+      var wanted = (size + 1) ~/ 3;
+      if (wanted > near.length) wanted = near.length;
+      for (var k = 0; k < wanted; k++) {
+        final theme = near[(dayIndex + k) % near.length];
+        if (picked.contains(theme)) continue;
+        // Not always first. A feed that opens on your own trouble every
+        // morning has stopped being a feed.
+        picked[(dayIndex + k * 2) % size] = theme;
+      }
+    }
+    return [for (final at in picked) subjects[at]];
+  }
+
   static String task({
-    required String memoryBlock,
     required int count,
     required int dayIndex,
+    List<int> themes = const [],
     List<String> recentTitles = const [],
     List<String> recentAuthors = const [],
     List<String> recentTags = const [],
   }) {
-    final ground = subjectsFor(dayIndex, count);
-    final knows = memoryBlock.trim().isEmpty
-        ? '''
-You do not yet know what this couple is carrying, so write from the ground
+    final ground = groundFor(dayIndex: dayIndex, count: count, themes: themes);
+    const knows = '''
+You know nothing about who will read these, and you are not writing for
+anyone in particular. Each post is one stranger's life. Write from the ground
 listed below and nothing else.
-'''
-        : '''
-Here is what you know about the couple who will read these.
-
-$memoryBlock
-
-DO NOT WRITE THEIR LIFE BACK TO THEM. Aim for about half-recognisable: the
-same KIND of ache, different circumstances, different specifics. If they are
-fighting about her mother, write about a brother-in-law who moved in for three
-months. If the trouble is a teenage son, write about a daughter who stopped
-calling. If it is money, write about someone whose money turned out not to be
-about money at all.
-
-The test is simple. A reader should think "that is close to us". If they could
-map the post onto their own life point for point, it is far too close, and
-what they will feel is watched rather than accompanied.
-
-And at least one post in three should be about something they are NOT dealing
-with at all. A real group is full of people whose problems are not yours;
-that is most of what makes it feel like a group rather than a mirror.
 ''';
 
     final avoid = StringBuffer();
@@ -132,6 +217,11 @@ sentence somebody actually said, the thing that turned out not to be the point.
 
 Invent those details fresh every time. Do not reuse an example you have seen,
 including anything in these instructions.
+
+Skip the first story that comes to mind for a subject, because it is the first
+one that comes to everyone's: the secret account or hidden card for money, the
+mother-in-law with a key for family, the affair for trust. Go one further and
+write the version nobody expects.
 
 VARY THE DISTANCE FROM THE PROBLEM. Roughly:
 - a third should be years past it, able to say plainly what changed

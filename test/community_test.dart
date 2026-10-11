@@ -250,7 +250,7 @@ void main() {
     });
 
     test('the prompt forbids them, and does not model them either', () {
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
+      final task = CommunityPrompt.task(count: 3, dayIndex: 0);
       expect(task, contains('Never use an em dash'));
       // Showing the model em dashes while telling it not to use them is the
       // weakest possible instruction.
@@ -284,7 +284,7 @@ void main() {
     });
 
     test('the subjects reach the prompt, numbered', () {
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 5);
+      final task = CommunityPrompt.task(count: 3, dayIndex: 5);
       for (final subject in CommunityPrompt.subjectsFor(5, 3)) {
         expect(task, contains(subject));
       }
@@ -295,7 +295,7 @@ void main() {
     test('the worked example that got copied verbatim is gone', () {
       // Every generation returned a variant of the hidden-account story
       // because the prompt handed it one to copy.
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
+      final task = CommunityPrompt.task(count: 3, dayIndex: 0);
       expect(task, isNot(contains('200 dollars a month')));
       expect(task, contains('Do not reuse an example'));
     });
@@ -351,26 +351,80 @@ void main() {
 
     test('the prompt forbids the single-prayer fix and demands outside help',
         () {
-      final task = CommunityPrompt.task(memoryBlock: '', count: 3, dayIndex: 0);
+      final task = CommunityPrompt.task(count: 3, dayIndex: 0);
       expect(task, contains('single prayer'));
       expect(task.toLowerCase(), contains('counsellor'));
       expect(task, contains('fromAuthor'));
     });
 
-    test('the prompt carries the couple\'s own struggles when there are any',
-        () {
+    test('what the couple told EXODUS never reaches the story prompt', () {
+      const memory = 'They argue about her mother Carol moving in. '
+          'He hid 4,200 dollars of debt on the Visa.';
       final task = CommunityPrompt.task(
-          memoryBlock: 'They argue about her mother.', count: 3, dayIndex: 0);
-      expect(task, contains('They argue about her mother.'));
+          count: 5, dayIndex: 0, themes: CommunityPrompt.themesIn(memory));
+      for (final detail in ['Carol', '4,200', 'Visa', 'moving in']) {
+        expect(task, isNot(contains(detail)), reason: detail);
+      }
+      expect(task, contains('You know nothing about who will read these'));
     });
 
-    test('the prompt keeps the stories at arm\'s length', () {
-      final task = CommunityPrompt.task(
-          memoryBlock: 'They argue about her mother.', count: 3, dayIndex: 0);
-      expect(task, contains('DO NOT WRITE THEIR LIFE BACK TO THEM'));
-      expect(task, contains('half-recognisable'));
-      // A feed that only mirrors them is not a group.
-      expect(task, contains('one post in three'));
+    test('memory is reduced to broad subjects, most-mentioned first', () {
+      final themes = CommunityPrompt.themesIn(
+          'They fight about money. The debt is his. Money again last week. '
+          'Her mother keeps calling.');
+      expect(themes.first, 0, reason: 'money is mentioned most');
+      expect(themes, contains(1));
+      expect(CommunityPrompt.themesIn(''), isEmpty);
+      expect(CommunityPrompt.themesIn('They like hiking.'), isEmpty);
+    });
+
+    test('most of a batch is other people\'s ground', () {
+      const themes = [0, 1, 9]; // money, in-laws, anger
+      final own = {for (final t in themes) CommunityPrompt.subjects[t]};
+      for (var day = 0; day < 60; day++) {
+        final three = CommunityPrompt.groundFor(
+            dayIndex: day, count: 3, themes: themes);
+        expect(three, hasLength(3));
+        expect(three.toSet(), hasLength(3));
+        expect(three.where(own.contains).length, lessThanOrEqualTo(1),
+            reason: 'day $day');
+
+        final five = CommunityPrompt.groundFor(
+            dayIndex: day, count: 5, themes: themes);
+        expect(five.where(own.contains).length, lessThanOrEqualTo(2),
+            reason: 'day $day');
+      }
+    });
+
+    test('one worry does not come round every day', () {
+      final money = CommunityPrompt.subjects[0];
+      var days = 0;
+      for (var day = 0; day < 30; day++) {
+        final batch = CommunityPrompt.groundFor(
+            dayIndex: day, count: 3, themes: const [0]);
+        if (batch.contains(money)) days++;
+      }
+      expect(days, 10, reason: 'one day in three');
+    });
+
+    test('the near story is not always the first one', () {
+      const themes = [0, 1, 9];
+      final own = {for (final t in themes) CommunityPrompt.subjects[t]};
+      final positions = <int>{};
+      for (var day = 0; day < 30; day++) {
+        final batch = CommunityPrompt.groundFor(
+            dayIndex: day, count: 3, themes: themes);
+        final at = batch.indexWhere(own.contains);
+        if (at >= 0) positions.add(at);
+      }
+      expect(positions, hasLength(3));
+    });
+
+    test('with nothing known the batch is the plain rotation', () {
+      for (var day = 0; day < 10; day++) {
+        expect(CommunityPrompt.groundFor(dayIndex: day, count: 3),
+            CommunityPrompt.subjectsFor(day, 3));
+      }
     });
   });
 }
