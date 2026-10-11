@@ -1,4 +1,5 @@
 import 'master_prompt.dart';
+import '../services/custom_instructions.dart';
 import '../services/memory_store.dart';
 
 /// System instructions for the live voice coaching sessions.
@@ -42,7 +43,7 @@ HOW TO COACH
 - Watch the clock. Around the final minute, wrap up: name the one thing for
   them to practice, and close with a short prayer or blessing over their
   marriage.
-''';
+${CustomInstructions.instance.promptBlock()}''';
 
   /// The realtime voice. One of OpenAI's realtime voices; "verse" reads as
   /// warm and grounded. Swap if you want a different feel.

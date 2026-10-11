@@ -51,7 +51,8 @@ class MemoryScreen extends StatelessWidget {
           child: Text(
             "EXODUS hasn't learned anything to remember yet.\n\n"
             "As you talk in Counsel and Coaching, it will note durable things "
-            "about your marriage here — and you can edit or remove any of them.",
+            "about your marriage here — and you can edit or remove any of them. "
+            "Anything you add yourself is kept for good.",
             textAlign: TextAlign.center,
             style: TextStyle(color: ExodusTheme.ironMist, fontSize: 14, height: 1.5),
           ),
@@ -85,10 +86,18 @@ class MemoryScreen extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.only(top: 2, right: 12),
-                child: Icon(Icons.psychology_outlined,
-                    size: 18, color: ExodusTheme.brass),
+              // What they wrote stays; what was inferred can be displaced.
+              // The mark says which is which.
+              Padding(
+                padding: const EdgeInsets.only(top: 2, right: 12),
+                child: Icon(
+                    m.isPreference
+                        ? Icons.tune_rounded
+                        : m.pinned
+                            ? Icons.push_pin_outlined
+                            : Icons.psychology_outlined,
+                    size: 18,
+                    color: ExodusTheme.brass),
               ),
               Expanded(
                 child: Text(m.text,

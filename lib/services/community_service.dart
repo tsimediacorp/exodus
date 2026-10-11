@@ -81,6 +81,13 @@ class CommunityService extends ChangeNotifier {
       if (decoded is! Map<String, dynamic>) return false;
       final raw = (decoded['stories'] as List<dynamic>?) ?? const [];
 
+      // A story with no publish time was stamped "now" on every check-in, so
+      // it jumped to the top each launch regardless of when it was written.
+      final firstSeen = {
+        for (final p in _posts)
+          if (p.curated) p.id: p.createdAt,
+      };
+
       final curated = <CommunityPost>[];
       for (final entry in raw) {
         if (entry is! Map<String, dynamic>) continue;
@@ -90,6 +97,7 @@ class CommunityService extends ChangeNotifier {
           entry,
           id: id,
           createdAt: DateTime.tryParse(entry['publishedAt'] as String? ?? '') ??
+              firstSeen[id] ??
               DateTime.now(),
         );
         // A curated story is shown as written. The usable check exists to
@@ -186,9 +194,51 @@ class CommunityService extends ChangeNotifier {
 
   void _merge(List<CommunityPost> fresh) {
     // Newest first, and never past the cap.
-    _posts = [...fresh, ..._posts];
+    _posts = [..._restamp(fresh, _posts, DateTime.now()), ..._posts];
     _posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     if (_posts.length > maxPosts) _posts = _posts.sublist(0, maxPosts);
+  }
+
+  /// Make sure every post in [fresh] is dated after everything in [existing].
+  ///
+  /// A batch is back-dated across the previous several hours so it does not
+  /// read as stamped at 9:04am. But the feed is ordered by that same time, so
+  /// a batch written shortly after the last one landed INSIDE it: tonight's
+  /// stories dated 9:30pm and 7:10pm sat underneath last night's 9:23pm, and
+  /// a refresh on the same day shuffled new stories in among the old. The
+  /// newest stories were on the device and not at the top.
+  ///
+  /// When the back-dated times would overlap what is already there, the batch
+  /// is spread across the gap that actually exists instead.
+  @visibleForTesting
+  static List<CommunityPost> restampForTest(List<CommunityPost> fresh,
+          List<CommunityPost> existing, DateTime now) =>
+      _restamp(fresh, existing, now);
+
+  static List<CommunityPost> _restamp(
+      List<CommunityPost> fresh, List<CommunityPost> existing, DateTime now) {
+    if (fresh.isEmpty || existing.isEmpty) return fresh;
+    final newestOld = existing
+        .map((p) => p.createdAt)
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+    final oldestNew = fresh
+        .map((p) => p.createdAt)
+        .reduce((a, b) => a.isBefore(b) ? a : b);
+    if (oldestNew.isAfter(newestOld)) return fresh;
+
+    // Keep the batch's own order, and fit it between the newest existing post
+    // and now. If the clock has gone backwards there is no gap, so make one.
+    final ordered = [...fresh]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final ceiling = now.isAfter(newestOld)
+        ? now
+        : newestOld.add(Duration(minutes: ordered.length + 1));
+    final gap = ceiling.difference(newestOld);
+    final step = gap ~/ (ordered.length + 1);
+    return [
+      for (var i = 0; i < ordered.length; i++)
+        ordered[i].movedTo(ceiling.subtract(step * (i + 1))),
+    ];
   }
 
   /// Days since a fixed epoch. Only used to rotate the subjects, so it must
@@ -235,6 +285,9 @@ class CommunityService extends ChangeNotifier {
           maxTokens: 6000,
           timeout: const Duration(seconds: 60),
           workingMessage: 'Finding people who have been here…',
+          // These are not EXODUS answering the couple, so how they asked to
+          // be answered has no business in them.
+          customInstructions: false,
         );
 
         final posts = _parse(raw);

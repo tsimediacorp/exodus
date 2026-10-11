@@ -42,6 +42,11 @@ class StorageService {
   static const _kDevotionals       = 'exodus.devotional.entries';
   static const _kMemory            = 'exodus.memory.items';
   static const _kComposerDraft     = 'exodus.composer.draft';
+  // Written by the couple, on this device. Never synced to the panel and
+  // never writable from it — see CustomInstructions for why that matters.
+  static const _kInstructionsAbout = 'exodus.instructions.about';
+  static const _kInstructionsHow   = 'exodus.instructions.how';
+  static const _kInstructionsOn    = 'exodus.instructions.enabled';
   static const _kReaderFontSize    = 'exodus.reader.fontSize';
   static const _kBiblePaged        = 'exodus.bible.pagedMode';
   static const _kBibleTranslation  = 'exodus.bible.translation';
@@ -552,6 +557,24 @@ class StorageService {
   Future<void> saveMemory(List<MemoryItem> items) async {
     await _prefs?.setString(
         _kMemory, jsonEncode(items.map((m) => m.toJson()).toList()));
+  }
+
+  // ---------------- Custom instructions ----------------
+
+  String get instructionsAbout => _prefs?.getString(_kInstructionsAbout) ?? '';
+  String get instructionsHow => _prefs?.getString(_kInstructionsHow) ?? '';
+  bool get instructionsEnabled => _prefs?.getBool(_kInstructionsOn) ?? true;
+
+  Future<void> saveInstructions({
+    required String about,
+    required String how,
+    required bool enabled,
+  }) async {
+    final p = _prefs;
+    if (p == null) return;
+    await p.setString(_kInstructionsAbout, about);
+    await p.setString(_kInstructionsHow, how);
+    await p.setBool(_kInstructionsOn, enabled);
   }
 
   // ---------------- Prompt overrides ----------------

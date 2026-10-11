@@ -15,9 +15,12 @@ import '../services/memory_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../services/voice_input_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/exodus_shield.dart';
 import '../widgets/check_in_card.dart';
+import '../widgets/day_divider.dart';
+import '../widgets/dictation_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/page_backdrop.dart';
 import '../widgets/progress_view.dart';
@@ -31,8 +34,24 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => ChatScreenState();
 }
 
+/// Where the composer is with a spoken message.
+enum _Dictation { idle, recording, transcribing }
+
 /// Public so HomeShell can drive conversation selection from the shared drawer.
-class ChatScreenState extends State<ChatScreen> {
+class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  final VoiceInputService _voice = VoiceInputService();
+  _Dictation _dictation = _Dictation.idle;
+
+  /// Stops a recording that has reached the longest clip worth uploading.
+  Timer? _dictationLimit;
+
+  /// Exchanges since memory was last distilled from the open conversation.
+  int _sinceCapture = 0;
+
+  /// Distil memory at least this often inside one long conversation, instead
+  /// of only when it is left.
+  static const int _captureEvery = 6;
+
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final AiService _ai = AiService();
@@ -98,18 +117,49 @@ class ChatScreenState extends State<ChatScreen> {
   /// rebuilds a bubble — would replay the entrance.
   ChatMessage? _arriving;
 
-  final List<String> _starters = const [
+  /// Ways in. Four are offered at a time and they change with the day, so the
+  /// first screen is not the same four sentences for as long as the app is
+  /// installed.
+  static const List<String> starterPool = [
     'How do we lead our marriage spiritually as newlyweds?',
     'What does scripture say about money in marriage?',
     'I\'m struggling with lust. Where do I begin?',
     'How do we resolve conflict without wounding each other?',
+    'We keep having the same argument. What are we missing?',
+    'How do we pray together when it feels awkward?',
+    'What does forgiveness look like when trust is broken?',
+    'How do we set boundaries with family without dishonoring them?',
+    'We feel more like roommates lately. Where do we start?',
+    'How should we make a big decision when we disagree?',
+    'What does it mean to love my spouse when I don\'t feel it?',
+    'How do we raise our children to know the Lord?',
   ];
+
+  /// The four starters for [day]. Consecutive days share none.
+  static List<String> startersFor(DateTime day) {
+    final index = DateTime(day.year, day.month, day.day)
+        .difference(DateTime(2000))
+        .inDays;
+    final start = (index * 4) % starterPool.length;
+    return [
+      for (var i = 0; i < 4; i++) starterPool[(start + i) % starterPool.length],
+    ];
+  }
+
+  /// A greeting for the hour, set small above the heading.
+  static String greetingFor(DateTime now) {
+    final h = now.hour;
+    if (h >= 5 && h < 12) return 'Good morning';
+    if (h >= 12 && h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
 
   List<ChatMessage> get _messages => _current?.messages ?? const [];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
     // Restore anything typed but never sent before the app was killed.
     _input.text = _storage.loadComposerDraft();
@@ -230,8 +280,91 @@ class ChatScreenState extends State<ChatScreen> {
     if (show != _showScrollDown) setState(() => _showScrollDown = show);
   }
 
+  /// Leaving the app is the last moment anything said here can be kept, and
+  /// a recording cannot survive it.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.paused) return;
+    if (_dictation == _Dictation.recording) unawaited(_cancelDictation());
+    if (_sinceCapture > 0 && !_sending) {
+      _sinceCapture = 0;
+      _captureMemory(_current);
+    }
+  }
+
+  // ---------------- Voice input ----------------
+
+  void _notice(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      duration: const Duration(seconds: 3),
+    ));
+  }
+
+  Future<void> _startDictation() async {
+    if (_dictation != _Dictation.idle || _sending) return;
+    // The keyboard and the waveform would be fighting for the same strip.
+    FocusManager.instance.primaryFocus?.unfocus();
+    TtsService.instance.stop();
+    HapticFeedback.mediumImpact();
+    try {
+      await _voice.start();
+    } on VoiceInputException catch (e) {
+      _notice(e.message);
+      return;
+    }
+    if (!mounted) {
+      unawaited(_voice.cancel());
+      return;
+    }
+    setState(() => _dictation = _Dictation.recording);
+    _dictationLimit = Timer(
+        VoiceInputService.maxDuration, () => _finishDictation(send: false));
+  }
+
+  Future<void> _cancelDictation() async {
+    _dictationLimit?.cancel();
+    await _voice.cancel();
+    if (mounted) setState(() => _dictation = _Dictation.idle);
+  }
+
+  /// Stop listening and put the words in the composer, or with [send] straight
+  /// into the conversation.
+  Future<void> _finishDictation({required bool send}) async {
+    if (_dictation != _Dictation.recording) return;
+    _dictationLimit?.cancel();
+    HapticFeedback.lightImpact();
+    setState(() => _dictation = _Dictation.transcribing);
+
+    var spoken = '';
+    String? problem;
+    try {
+      spoken = await _voice.stopAndTranscribe();
+    } on VoiceInputException catch (e) {
+      problem = e.message;
+    } catch (_) {
+      problem = 'Could not transcribe that. Try again.';
+    }
+    if (!mounted) return;
+    setState(() => _dictation = _Dictation.idle);
+
+    if (problem != null) return _notice(problem);
+    if (spoken.isEmpty) return _notice('Nothing was heard. Try again.');
+
+    final text = VoiceInputService.appendTo(_input.text, spoken);
+    _input.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    if (send && !_sending) _sendWithHaptic();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _dictationLimit?.cancel();
+    unawaited(_voice.dispose());
     _activeStream?.cancel();
     _draftDebounce?.cancel();
     CheckInService.instance.removeListener(_onCheckInsChanged);
@@ -313,6 +446,8 @@ class ChatScreenState extends State<ChatScreen> {
 
   /// Let the user pick where the image comes from, then pick one.
   Future<void> _attachImage() async {
+    // Let the keyboard go before anything is presented over it.
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_pendingImages.length >= _maxAttachments) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -584,6 +719,16 @@ class ChatScreenState extends State<ChatScreen> {
       }
       await _persist();
       if (!_showScrollDown) _scrollToEnd();
+
+      // Keep what was just said while it is still the conversation in hand.
+      // This used to wait until the thread was left, so "remember that" was
+      // lost whenever the couple simply carried on or closed the app.
+      _sinceCapture++;
+      if (MemoryService.asksToRemember(prompt) ||
+          _sinceCapture >= _captureEvery) {
+        _sinceCapture = 0;
+        _captureMemory(conv);
+      }
     }
   }
 
@@ -592,6 +737,7 @@ class ChatScreenState extends State<ChatScreen> {
 
   void newConversation() {
     _captureMemory(_current);
+    _sinceCapture = 0;
     _activeStream?.cancel();
     TtsService.instance.stop();
     setState(() {
@@ -602,7 +748,10 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   void openConversation(String id) {
-    if (id != _current?.id) _captureMemory(_current);
+    if (id != _current?.id) {
+      _captureMemory(_current);
+      _sinceCapture = 0;
+    }
     _activeStream?.cancel();
     TtsService.instance.stop();
     final conv = _conversations.firstWhere((c) => c.id == id);
@@ -983,7 +1132,17 @@ class ChatScreenState extends State<ChatScreen> {
       child: Column(
         children: [
           const ExodusShield(size: 88),
-          const SizedBox(height: 30),
+          const SizedBox(height: 26),
+          Text(
+            greetingFor(DateTime.now()).toUpperCase(),
+            style: const TextStyle(
+              color: ExodusTheme.brass,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 2.4,
+            ),
+          ),
+          const SizedBox(height: 10),
           const Text(
             'Walk in His design.',
             style: TextStyle(
@@ -1008,8 +1167,43 @@ class ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(height: 40),
-          ..._starters.map(_buildStarter),
+          ...startersFor(DateTime.now()).map(_buildStarter),
+          if (_canDictate) _sayItInstead(),
         ],
+      ),
+    );
+  }
+
+  bool get _canDictate => VoiceInputService.isConfigured;
+
+  /// The other way in. Some things are easier said than typed, and the
+  /// microphone in the composer is small enough to miss on a first visit.
+  Widget _sayItInstead() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: InkWell(
+        onTap: _startDictation,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mic_none_rounded,
+                  size: 17, color: ExodusTheme.brass),
+              const SizedBox(width: 8),
+              Text(
+                'Or say it out loud',
+                style: TextStyle(
+                  fontFamily: ExodusTheme.serif,
+                  color: ExodusTheme.parchment.withValues(alpha: 0.86),
+                  fontSize: 15,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1069,19 +1263,44 @@ class ChatScreenState extends State<ChatScreen> {
             left: 0,
             right: 0,
             child: Center(
+              // Says what is down there. A bare arrow could not tell someone
+              // reading back that an answer was arriving underneath them.
               child: Material(
                 color: ExodusTheme.midnight,
-                shape: const CircleBorder(
-                  side: BorderSide(color: ExodusTheme.steel),
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: _sending
+                        ? ExodusTheme.brass.withValues(alpha: 0.45)
+                        : ExodusTheme.steel,
+                  ),
                 ),
                 elevation: 4,
                 child: InkWell(
-                  customBorder: const CircleBorder(),
+                  customBorder: const StadiumBorder(),
                   onTap: _scrollToEnd,
-                  child: const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: ExodusTheme.covenantGlow, size: 26),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 10, 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _sending ? 'EXODUS is answering' : 'Latest',
+                          style: TextStyle(
+                            color: _sending
+                                ? ExodusTheme.brass
+                                : ExodusTheme.porcelain,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.keyboard_arrow_down_rounded,
+                            color: _sending
+                                ? ExodusTheme.brass
+                                : ExodusTheme.covenantGlow,
+                            size: 20),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1094,6 +1313,10 @@ class ChatScreenState extends State<ChatScreen> {
   Widget _buildMessageList() {
     return ListView.builder(
       controller: _scroll,
+      // Pulling the thread down to read is the natural way to say "I am done
+      // typing", and it leaves the keyboard closed by the field losing focus
+      // rather than by anything the platform has to report.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.only(top: 8, bottom: 12),
       itemCount: _messages.length,
       itemBuilder: (_, i) {
@@ -1118,7 +1341,20 @@ class ChatScreenState extends State<ChatScreen> {
         // The match key goes on a wrapper, not the bubble: the bubble already
         // carries an ObjectKey, and a widget can only hold one.
         final matchKey = _matchKeys[i];
-        return matchKey == null ? bubble : KeyedSubtree(key: matchKey, child: bubble);
+        final keyed = matchKey == null
+            ? bubble
+            : KeyedSubtree(key: matchKey, child: bubble);
+        // Mark the turn of each day. Not above the very first message of a
+        // conversation begun today: "Today" over a thread that is entirely
+        // today tells nobody anything.
+        final newDay = i == 0
+            ? !DayDivider.sameDay(msg.timestamp, DateTime.now())
+            : !DayDivider.sameDay(_messages[i - 1].timestamp, msg.timestamp);
+        if (!newDay) return keyed;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [DayDivider(day: msg.timestamp), keyed],
+        );
       },
     );
   }
@@ -1177,7 +1413,12 @@ class ChatScreenState extends State<ChatScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: ExodusTheme.slate.withValues(alpha: 0.6),
-          border: Border.all(color: ExodusTheme.brass.withValues(alpha: 0.20)),
+          // The pill warms while EXODUS is listening, so the state is legible
+          // from the edge of the screen and not only from the red dot.
+          border: Border.all(
+            color: ExodusTheme.brass
+                .withValues(alpha: _dictation == _Dictation.idle ? 0.20 : 0.55),
+          ),
           borderRadius: BorderRadius.circular(26),
         ),
         padding: EdgeInsets.fromLTRB(6, _pendingImages.isNotEmpty ? 10 : 5, 5, 5),
@@ -1185,112 +1426,136 @@ class ChatScreenState extends State<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_pendingImages.isNotEmpty) _buildPendingImages(),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.add_photo_alternate_outlined,
-                        size: 21),
-                    color: ExodusTheme.ironMist,
-                    disabledColor: ExodusTheme.steel,
-                    tooltip: 'Attach image',
-                    onPressed: _sending ? null : _attachImage,
+            if (_dictation != _Dictation.idle)
+              DictationBar(
+                voice: _voice,
+                transcribing: _dictation == _Dictation.transcribing,
+                onCancel: _cancelDictation,
+                onDone: () => _finishDictation(send: false),
+                onSend: () => _finishDictation(send: true),
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.add_photo_alternate_outlined,
+                          size: 21),
+                      color: ExodusTheme.ironMist,
+                      disabledColor: ExodusTheme.steel,
+                      tooltip: 'Attach image',
+                      onPressed: _sending ? null : _attachImage,
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: TextField(
-                      controller: _input,
-                      maxLines: 5,
-                      minLines: 1,
-                      // Multi-line composing: Return inserts a newline, so
-                      // there's no onSubmitted callback to hang a send off
-                      // (it never fires).
-                      textInputAction: TextInputAction.newline,
-                      cursorColor: ExodusTheme.covenantGlow,
-                      style: const TextStyle(
-                          fontFamily: ExodusTheme.serif,
-                          color: ExodusTheme.parchment,
-                          fontSize: 16),
-                      // The field is inside the pill now, so it must not draw
-                      // the app-wide fill and outline of its own.
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        filled: false,
-                        contentPadding: EdgeInsets.symmetric(vertical: 11),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        hintText: 'Ask EXODUS…',
-                        hintStyle: TextStyle(
-                          fontFamily: ExodusTheme.serif,
-                          color: ExodusTheme.ironMist,
-                          fontSize: 16,
-                          fontStyle: FontStyle.italic,
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: TextField(
+                        controller: _input,
+                        maxLines: 5,
+                        minLines: 1,
+                        // Multi-line composing: Return inserts a newline, so
+                        // there's no onSubmitted callback to hang a send off
+                        // (it never fires).
+                        textInputAction: TextInputAction.newline,
+                        cursorColor: ExodusTheme.covenantGlow,
+                        style: const TextStyle(
+                            fontFamily: ExodusTheme.serif,
+                            color: ExodusTheme.parchment,
+                            fontSize: 16),
+                        // The field is inside the pill now, so it must not draw
+                        // the app-wide fill and outline of its own.
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          filled: false,
+                          contentPadding: EdgeInsets.symmetric(vertical: 11),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          hintText: 'Ask EXODUS…',
+                          hintStyle: TextStyle(
+                            fontFamily: ExodusTheme.serif,
+                            color: ExodusTheme.ironMist,
+                            fontSize: 16,
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                // While streaming this becomes a Stop button — the
-                // subscription was already cancellable, it just had no way to
-                // reach it.
-                Semantics(
-                  button: true,
-                  label: _sending ? 'Stop generating' : 'Send message',
-                  child: GestureDetector(
-                    onTap: _sending
-                        ? _stopGenerating
-                        : (canSend ? _sendWithHaptic : null),
-                    child: Container(
+                  // Beside send rather than in place of it, so something
+                  // spoken can be added to something already typed.
+                  if (_canDictate && !_sending)
+                    SizedBox(
                       width: 40,
                       height: 40,
-                      decoration: BoxDecoration(
-                        // Flat steel until there is something to send, so the
-                        // glowing button always means "this will do something".
-                        gradient: (!_sending && canSend)
-                            ? const LinearGradient(
-                                colors: [
-                                  ExodusTheme.brassGlow,
-                                  ExodusTheme.brass
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              )
-                            : null,
-                        color: (!_sending && canSend) ? null : ExodusTheme.steel,
-                        shape: BoxShape.circle,
-                        boxShadow: (!_sending && canSend)
-                            ? [
-                                BoxShadow(
-                                  color: ExodusTheme.brass
-                                      .withValues(alpha: 0.34),
-                                  blurRadius: 14,
-                                  spreadRadius: 1,
-                                ),
-                              ]
-                            : null,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.mic_none_rounded, size: 22),
+                        color: ExodusTheme.ironMist,
+                        tooltip: 'Speak instead of typing',
+                        onPressed: _startDictation,
                       ),
-                      child: Icon(
-                        _sending ? Icons.stop_rounded : Icons.arrow_upward,
-                        // Dark glyph on brass; porcelain on brass is unreadable.
-                        color: (!_sending && canSend)
-                            ? ExodusTheme.obsidian
-                            : (_sending
-                                ? ExodusTheme.porcelain
-                                : ExodusTheme.ironMist),
-                        size: _sending ? 18 : 20,
+                    ),
+                  // While streaming this becomes a Stop button — the
+                  // subscription was already cancellable, it just had no way to
+                  // reach it.
+                  Semantics(
+                    button: true,
+                    label: _sending ? 'Stop generating' : 'Send message',
+                    child: GestureDetector(
+                      onTap: _sending
+                          ? _stopGenerating
+                          : (canSend ? _sendWithHaptic : null),
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          // Flat steel until there is something to send, so the
+                          // glowing button always means "this will do something".
+                          gradient: (!_sending && canSend)
+                              ? const LinearGradient(
+                                  colors: [
+                                    ExodusTheme.brassGlow,
+                                    ExodusTheme.brass
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                              : null,
+                          color:
+                              (!_sending && canSend) ? null : ExodusTheme.steel,
+                          shape: BoxShape.circle,
+                          boxShadow: (!_sending && canSend)
+                              ? [
+                                  BoxShadow(
+                                    color: ExodusTheme.brass
+                                        .withValues(alpha: 0.34),
+                                    blurRadius: 14,
+                                    spreadRadius: 1,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Icon(
+                          _sending ? Icons.stop_rounded : Icons.arrow_upward,
+                          // Dark glyph on brass; porcelain on brass is unreadable.
+                          color: (!_sending && canSend)
+                              ? ExodusTheme.obsidian
+                              : (_sending
+                                  ? ExodusTheme.porcelain
+                                  : ExodusTheme.ironMist),
+                          size: _sending ? 18 : 20,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),

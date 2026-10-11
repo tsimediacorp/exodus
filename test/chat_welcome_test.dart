@@ -18,9 +18,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('Walk in His design.'), findsOneWidget);
-    expect(
-        find.text('How do we lead our marriage spiritually as newlyweds?'),
-        findsOneWidget);
+    // Four of the pool, chosen by the day.
+    final offered = ChatScreenState.starterPool
+        .where((s) => find.text(s).evaluate().isNotEmpty)
+        .toList();
+    expect(offered, hasLength(4));
+    expect(offered, ChatScreenState.startersFor(DateTime.now()));
 
     // The outline came off: four bordered cards in a column read as a form to
     // fill in. Fill alone separates a starter from the ground.
