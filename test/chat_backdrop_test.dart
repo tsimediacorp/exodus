@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:exodus/screens/chat_screen.dart';
 import 'package:exodus/theme/exodus_theme.dart';
+import 'package:exodus/widgets/exodus_shield.dart';
 import 'package:exodus/widgets/page_backdrop.dart';
 
 /// The warm light behind the thread used to be drawn into a fixed-height box.
@@ -86,5 +87,15 @@ void main() {
     final barBottom = tester.getBottomLeft(find.byType(AppBar)).dy;
     expect(headingTop, greaterThan(barBottom),
         reason: 'content is hidden behind the app bar');
+  });
+
+  testWidgets('the bar is cleared once, not twice', (tester) async {
+    await open(tester);
+    // A spacer for the bar, on top of the padding the Scaffold already gives
+    // a body that runs behind it, left a bar's height of nothing above every
+    // conversation.
+    final shieldTop = tester.getTopLeft(find.byType(ExodusShield).last).dy;
+    final barBottom = tester.getBottomLeft(find.byType(AppBar)).dy;
+    expect(shieldTop - barBottom, lessThan(60));
   });
 }
