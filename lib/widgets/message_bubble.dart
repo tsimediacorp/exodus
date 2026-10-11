@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/bible_ref.dart';
 import '../models/chat_message.dart';
 import '../screens/reader_screen.dart';
@@ -66,6 +67,11 @@ class MessageBubble extends StatefulWidget {
   /// Narration for the waiting state, while EXODUS is still composing.
   final ProgressController? progress;
 
+  /// The newest message in the thread. Its reply keeps a quiet row of actions
+  /// in view, because the answer you just received is the one you are most
+  /// likely to want to hear, copy or ask again.
+  final bool latest;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -76,6 +82,7 @@ class MessageBubble extends StatefulWidget {
     this.activeOccurrence,
     this.arriving = false,
     this.progress,
+    this.latest = false,
   });
 
   @override
@@ -190,29 +197,44 @@ class _MessageBubbleState extends State<MessageBubble> {
   static const TextStyle _exodusText = TextStyle(
     fontFamily: ExodusTheme.serif,
     color: ExodusTheme.parchment,
-    fontSize: 17,
-    height: 1.78,
+    // Brought in from 17 / 1.78. That leading was generous to the point of
+    // double spacing: a screen held eleven lines, and a reply of any length
+    // was mostly scrolling.
+    fontSize: 16.5,
+    height: 1.62,
     fontWeight: FontWeight.w300,
+    letterSpacing: 0.1,
   );
 
   /// The illuminated initial. Sized to drop two lines.
   static const TextStyle _capText = TextStyle(
     fontFamily: ExodusTheme.serif,
     color: ExodusTheme.brass,
-    fontSize: 50,
-    height: 0.92,
+    fontSize: 47,
+    height: 0.94,
     fontWeight: FontWeight.w600,
+    letterSpacing: 0,
   );
 
-  /// The question is the prompt, not the point: smaller, quieter, italic, and
-  /// set flush right without a bubble.
+  /// What the couple wrote, in the interface face: it is their message, typed
+  /// on a phone, and it should look like one beside EXODUS's set prose.
   static const TextStyle _userText = TextStyle(
-    fontFamily: ExodusTheme.serif,
-    color: ExodusTheme.ironMist,
-    fontSize: 15,
-    height: 1.5,
-    fontStyle: FontStyle.italic,
+    color: ExodusTheme.porcelain,
+    fontSize: 15.5,
+    height: 1.42,
+    letterSpacing: 0.1,
   );
+
+  /// Shortest opening paragraph that earns an illuminated initial: about two
+  /// lines on a phone.
+  static const int _minForCap = 80;
+
+  static String _clock(BuildContext context, DateTime t) =>
+      TimeOfDay.fromDateTime(t).format(context);
+
+  void _share() {
+    SharePlus.instance.share(ShareParams(text: _visibleText.trim()));
+  }
 
   /// Split [text] into spans, tinting every occurrence of the search term.
   /// The active occurrence gets a solid fill rather than a wash, so "match 3
@@ -298,7 +320,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
     if (_isUser) {
       return SelectableText(message.content,
-          style: style, textAlign: TextAlign.right, onTap: _toggleActions);
+          style: style, onTap: _toggleActions);
     }
     return _illuminated(_visibleText, style);
   }
@@ -317,8 +339,14 @@ class _MessageBubbleState extends State<MessageBubble> {
     final first = (split == -1 ? text : text.substring(0, split)).trim();
     final rest = split == -1 ? '' : text.substring(split).trim();
 
-    final plainOpening = first.isNotEmpty &&
-        RegExp(r'^[A-Za-z]').hasMatch(first) &&
+    // Two letters, not one. A capital dropped from "I'm sorry" leaves "'m
+    // sorry" beside it, and from "A week ago" leaves " week ago": the word has
+    // to survive losing its first letter.
+    //
+    // And long enough to wrap beside it. A capital two lines deep in front of
+    // "Good. Start tonight." is an ornament with nothing to hang on.
+    final plainOpening = first.length >= _minForCap &&
+        RegExp(r'^[A-Za-z]{2}').hasMatch(first) &&
         !RegExp(r'[*_`#\[\]|]').hasMatch(first);
 
     if (!plainOpening) {
@@ -328,7 +356,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropCapText(text: first, style: style, capStyle: _capText),
+        DropCapText(
+            text: first, style: style, capStyle: _capText, gap: 6),
         if (rest.isNotEmpty) ...[
           const SizedBox(height: 16),
           GptMarkdown(rest, style: style),
@@ -342,17 +371,30 @@ class _MessageBubbleState extends State<MessageBubble> {
     // 30pt between turns, which is where the breathing room comes from now
     // that neither speaker is padded inside a box.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 22),
-      child: _isUser ? _userTurn(context) : _exodusTurn(context),
+      padding: EdgeInsets.fromLTRB(20, _isUser ? 10 : 14, 20, _isUser ? 10 : 14),
+      // A reading measure. On a tablet or an unfolded phone the lines ran the
+      // full width of the glass, which is too long to read comfortably.
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          // Full width of the measure, so the couple's bubble can sit against
+          // its right edge instead of being centred along with the column.
+          child: SizedBox(
+            width: double.infinity,
+            child: _isUser ? _userTurn(context) : _exodusTurn(context),
+          ),
+        ),
+      ),
     );
   }
 
-  /// The question, set as a standfirst rather than a bubble.
+  /// The couple's message, in a bubble on the right.
   ///
-  /// It loses its filled pill entirely: in a thread where the answer is the
-  /// substance, a saturated blue slab for "can you give us some verses" pulls
-  /// more weight than the question deserves. A caps label and italic serif
-  /// flush right say who is speaking without competing.
+  /// It was a caps label over flush-right italic, which kept the page calm but
+  /// made a thread hard to read back: with no shape of its own, a short
+  /// question between two long replies disappeared. The bubble is quiet on
+  /// purpose — a raised surface and a hairline, not a saturated slab — so the
+  /// answer is still the substance.
   Widget _userTurn(BuildContext context) {
     final message = widget.message;
     final hasText = message.content.trim().isNotEmpty;
@@ -360,17 +402,11 @@ class _MessageBubbleState extends State<MessageBubble> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        const Text('YOU ASKED',
-            style: TextStyle(
-              color: ExodusTheme.ironMist,
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.6,
-            )),
-        const SizedBox(height: 6),
         ConstrainedBox(
           constraints: BoxConstraints(
-              maxWidth: MediaQuery.sizeOf(context).width * 0.72),
+              maxWidth: (MediaQuery.sizeOf(context).width * 0.8)
+                  .clamp(0, 520)
+                  .toDouble()),
           child: Semantics(
             button: true,
             label: 'Your message. Tap for options.',
@@ -383,9 +419,36 @@ class _MessageBubbleState extends State<MessageBubble> {
                 children: [
                   if (message.images.isNotEmpty)
                     _AttachedImages(images: message.images, hasText: hasText),
-                  if (hasText) _content(_userText),
+                  if (hasText)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 11),
+                      decoration: BoxDecoration(
+                        color: ExodusTheme.slate.withValues(alpha: 0.86),
+                        border: Border.all(
+                            color: ExodusTheme.brass.withValues(alpha: 0.16)),
+                        // The tight corner points at who is speaking.
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(6),
+                        ),
+                      ),
+                      child: _content(_userText),
+                    ),
                 ],
               ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 5, right: 4),
+          child: Text(
+            _clock(context, message.timestamp),
+            style: TextStyle(
+              color: ExodusTheme.ironMist.withValues(alpha: 0.7),
+              fontSize: 10.5,
+              letterSpacing: 0.2,
             ),
           ),
         ),
@@ -433,6 +496,18 @@ class _MessageBubbleState extends State<MessageBubble> {
                 ),
               ),
             ),
+            // When it was said, at the far end of the rule.
+            if (!waiting) ...[
+              const SizedBox(width: 10),
+              Text(
+                _clock(context, message.timestamp),
+                style: TextStyle(
+                  color: ExodusTheme.ironMist.withValues(alpha: 0.7),
+                  fontSize: 10.5,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 14),
@@ -472,8 +547,53 @@ class _MessageBubbleState extends State<MessageBubble> {
         if (!message.isStreaming && _keyRef != null)
           ScriptureHeroCard(reference: _keyRef!),
         if (!message.isStreaming) _scriptureBlocks(),
-        if (_showActions && _canShowActions) _actionBar(),
+        if (_showActions && _canShowActions)
+          _actionBar()
+        else if (widget.latest && _canShowActions && hasText)
+          _quickActions(),
       ],
+    );
+  }
+
+  /// Icons only, under the newest reply. The full labelled bar is still one
+  /// tap on the message away; this is the three things people actually do
+  /// with an answer they have just been given, without having to know that.
+  Widget _quickActions() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      // Pulled left by the icon's inset within its tap target, so the first
+      // glyph lines up with the text above it.
+      child: Transform.translate(
+        offset: const Offset(-11, 0),
+        child: Row(
+        children: [
+          _QuickAction(
+              icon: Icons.copy_rounded, label: 'Copy', onTap: _copy),
+          ValueListenableBuilder<String?>(
+            valueListenable: TtsService.instance.speakingKey,
+            builder: (_, speakingKey, __) {
+              final speaking = speakingKey == _ttsKey;
+              return _QuickAction(
+                icon: speaking
+                    ? Icons.stop_rounded
+                    : Icons.volume_up_outlined,
+                label: speaking ? 'Stop reading' : 'Read aloud',
+                highlight: speaking,
+                onTap: () => TtsService.instance
+                    .toggle(_ttsKey, widget.message.content),
+              );
+            },
+          ),
+          if (widget.onRegenerate != null)
+            _QuickAction(
+                icon: Icons.refresh_rounded,
+                label: 'Regenerate',
+                onTap: widget.onRegenerate!),
+          _QuickAction(
+              icon: Icons.ios_share_rounded, label: 'Share', onTap: _share),
+        ],
+        ),
+      ),
     );
   }
 
@@ -500,6 +620,45 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ),
                   ),
                 ),
+      ),
+    );
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool highlight;
+
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.highlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        // 40pt target around an 18pt glyph, pulled left so the first icon
+        // lines up with the text above it.
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(icon,
+              size: 18,
+              color: highlight
+                  ? ExodusTheme.brass
+                  : ExodusTheme.ironMist.withValues(alpha: 0.9)),
+        ),
       ),
     );
   }

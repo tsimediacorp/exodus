@@ -88,4 +88,40 @@ void main() {
       expect(run, isNot(startsWith(' ')));
     }
   });
+
+  testWidgets('the text beside the capital is never deeper than the capital',
+      (tester) async {
+    // On a phone the opening lines ran to three beside a two-line capital,
+    // leaving one word stranded under the indent. The measurement ignored the
+    // letter spacing the ambient text style adds when the text is drawn.
+    const style = TextStyle(fontSize: 17, height: 1.6);
+    for (final width in [300.0, 340.0, 372.0, 416.0, 520.0]) {
+      for (final spacing in [0.0, 0.25, 0.5, 1.0]) {
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(letterSpacing: spacing),
+                  child: const DropCapText(
+                    text: 'Sorry to hear about the pain. That is a heavy weight '
+                        'for both of you. Growing closer tonight, especially in '
+                        'the middle of this, is a powerful thing to choose.',
+                    style: style,
+                    capStyle: TextStyle(fontSize: 48, height: 0.92),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ));
+        final cap = tester.getSize(find.text('S'));
+        final beside = tester.getSize(find.textContaining('orry to hear'));
+        expect(beside.height, lessThanOrEqualTo(cap.height + 0.5),
+            reason: 'width $width, letter spacing $spacing');
+      }
+    }
+  });
 }

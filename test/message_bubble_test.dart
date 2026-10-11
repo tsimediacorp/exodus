@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:exodus/models/chat_message.dart';
 import 'package:exodus/theme/exodus_theme.dart';
 import 'package:exodus/widgets/drop_cap_text.dart';
@@ -26,11 +27,15 @@ void main() {
 
   /// Tap the body of an EXODUS reply.
   ///
-  /// The reply opens with an illuminated initial, so its first paragraph is
-  /// split across a capital and the run beside it — find.text on the whole
-  /// sentence no longer matches anything.
-  Future<void> tapReply(WidgetTester tester) =>
-      tester.tap(find.byType(DropCapText));
+  /// A long reply opens with an illuminated initial, so its first paragraph
+  /// is split across a capital and the run beside it; a short one goes
+  /// straight to the markdown renderer. Either way find.text on the whole
+  /// sentence matches nothing.
+  Future<void> tapReply(WidgetTester tester) {
+    final cap = find.byType(DropCapText);
+    return tester
+        .tap(cap.evaluate().isNotEmpty ? cap : find.byType(GptMarkdown).first);
+  }
 
   /// Every span the bubble builds, flattened.
   ///
@@ -66,7 +71,10 @@ void main() {
 
     testWidgets('a reply opens with an illuminated initial', (tester) async {
       await tester.pumpWidget(
-          host(MessageBubble(message: exodus('Sit with that a while.'))));
+          host(MessageBubble(
+              message: exodus('Sit with that a while, and do not rush to fix '
+                  'it tonight. Some things are meant to be carried together '
+                  'before they are solved.'))));
       expect(find.byType(DropCapText), findsOneWidget);
       // The capital is its own text run, in brass.
       final cap = tester.widget<Text>(find.text('S'));
@@ -81,17 +89,77 @@ void main() {
       expect(find.byType(DropCapText), findsNothing);
     });
 
-    testWidgets('the question is set flush right without a bubble',
+    testWidgets('the question sits in a quiet bubble, not a saturated slab',
         (tester) async {
       await tester.pumpWidget(host(MessageBubble(message: user('We fought.'))));
-      expect(find.text('YOU ASKED'), findsOneWidget);
-      // No filled slab behind it any more.
-      final filled = tester
-          .widgetList<Container>(find.byType(Container))
-          .where((c) =>
-              c.decoration is BoxDecoration &&
-              (c.decoration as BoxDecoration).gradient != null);
-      expect(filled, isEmpty);
+      // The caps label went with the bubble: its shape says who is speaking.
+      expect(find.text('YOU ASKED'), findsNothing);
+
+      final bubble = tester
+          .widgetList<Container>(find.ancestor(
+              of: find.text('We fought.'), matching: find.byType(Container)))
+          .map((c) => c.decoration)
+          .whereType<BoxDecoration>()
+          .first;
+      expect(bubble.color, isNotNull);
+      expect(bubble.gradient, isNull, reason: 'a fill, never a gradient slab');
+      // The tight corner points at the speaker.
+      expect((bubble.borderRadius as BorderRadius).bottomRight,
+          const Radius.circular(6));
+    });
+
+    testWidgets('a one-line reply gets no capital', (tester) async {
+      // Two lines deep in front of four words is an ornament on nothing.
+      await tester.pumpWidget(
+          host(MessageBubble(message: exodus('Good. Start tonight.'))));
+      expect(find.byType(DropCapText), findsNothing);
+    });
+
+    testWidgets('the couple\'s bubble sits against the right edge',
+        (tester) async {
+      // A phone. On anything wider the reading column is centred.
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(host(MessageBubble(message: user('We fought.'))));
+      final bubble = tester.getRect(find
+          .ancestor(of: find.text('We fought.'), matching: find.byType(Container))
+          .first);
+      expect(400 - bubble.right, lessThan(24));
+      expect(bubble.left, greaterThan(100));
+    });
+
+    testWidgets('a reply that opens on a one-letter word gets no capital',
+        (tester) async {
+      // "I'm sorry" with its I dropped leaves "'m sorry" beside it.
+      for (final opening in ["I'm sorry to hear that.", 'A week is not long.']) {
+        await tester.pumpWidget(host(MessageBubble(message: exodus(opening))));
+        expect(find.byType(DropCapText), findsNothing, reason: opening);
+      }
+    });
+
+    testWidgets('only the newest reply keeps its actions in view',
+        (tester) async {
+      await tester.pumpWidget(host(MessageBubble(message: exodus('Answer.'))));
+      expect(find.byTooltip('Read aloud'), findsNothing);
+
+      await tester.pumpWidget(
+          host(MessageBubble(message: exodus('Answer.'), latest: true)));
+      expect(find.byTooltip('Copy'), findsOneWidget);
+      expect(find.byTooltip('Read aloud'), findsOneWidget);
+      expect(find.byTooltip('Share'), findsOneWidget);
+      // Icons only. The labelled bar is still behind a tap.
+      expect(find.text('Copy'), findsNothing);
+    });
+
+    testWidgets('a reply still being written offers nothing yet',
+        (tester) async {
+      final streaming = ChatMessage(
+          content: 'Half a th', sender: Sender.exodus, isStreaming: true);
+      await tester.pumpWidget(
+          host(MessageBubble(message: streaming, latest: true)));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byTooltip('Copy'), findsNothing);
     });
 
     testWidgets('a user message carries no speaker label', (tester) async {

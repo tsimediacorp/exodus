@@ -46,6 +46,16 @@ class DropCapText extends StatelessWidget {
     final remainder = trimmed.substring(1);
     final scaler = MediaQuery.textScalerOf(context);
 
+    // Measure with the style the Text widgets will ACTUALLY draw in. A Text
+    // merges its style onto the ambient default, and Material's default body
+    // style carries letter spacing; measuring with the bare style made every
+    // line look slightly narrower than it would be drawn. The text beside the
+    // capital was therefore cut a word or two too long, wrapped onto a third
+    // line, and left a stub ("tonight,") hanging under the indent before the
+    // paragraph resumed at full width.
+    final style = DefaultTextStyle.of(context).style.merge(this.style);
+    final capStyle = DefaultTextStyle.of(context).style.merge(this.capStyle);
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
@@ -80,7 +90,9 @@ class DropCapText extends StatelessWidget {
           textDirection: TextDirection.ltr,
           textScaler: scaler,
           maxLines: capLines,
-        )..layout(maxWidth: besideWidth);
+          // A hair of slack, so a line that fits by a fraction of a pixel
+          // when measured cannot fail to fit when drawn.
+        )..layout(maxWidth: besideWidth - 1);
 
         final split = flow.getPositionForOffset(
           Offset(flow.width, flow.height - 1),

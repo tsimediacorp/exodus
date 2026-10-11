@@ -816,8 +816,10 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: SafeArea(
         child: Column(
           children: [
-            // Clears the transparent bar the body now runs behind.
-            const SizedBox(height: _barHeight),
+            // No spacer for the bar here. A Scaffold whose body extends behind
+            // its app bar already reports the bar's height as top padding, and
+            // the SafeArea above consumes it; a spacer as well cleared the bar
+            // twice and left a band of nothing above every conversation.
             if (!_storage.isAvailable) _storageWarning(),
             // Something EXODUS remembered and means to come back to. Sits
             // above the thread rather than interrupting it, and only when
@@ -1255,11 +1257,34 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return Stack(
       children: [
         _buildMessageList(),
+        // The thread dissolves into the composer instead of being sliced off
+        // by it mid-line.
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 34,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    ExodusTheme.obsidian.withValues(alpha: 0),
+                    ExodusTheme.obsidian,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
         // While searching, the up/down match controls own vertical movement —
         // a second jump affordance would just fight them.
         if (_showScrollDown && !_searching)
           Positioned(
-            bottom: 12,
+            // Low enough to sit in the fade rather than across a line of text.
+            bottom: 6,
             left: 0,
             right: 0,
             child: Center(
@@ -1317,7 +1342,7 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // typing", and it leaves the keyboard closed by the field losing focus
       // rather than by anything the platform has to report.
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.only(top: 8, bottom: 12),
+      padding: const EdgeInsets.only(top: 8, bottom: 30),
       itemCount: _messages.length,
       itemBuilder: (_, i) {
         final msg = _messages[i];
@@ -1329,6 +1354,7 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           searchQuery: _searching ? _search.text.trim() : '',
           activeOccurrence: _searching ? _activeOccurrenceIn(i) : null,
           arriving: identical(msg, _arriving),
+          latest: i == _messages.length - 1,
           progress: _status,
           onRegenerate: msg.sender == Sender.exodus && !_sending
               ? () => _regenerate(msg)
