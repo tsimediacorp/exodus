@@ -16,10 +16,11 @@ import 'memory_store.dart';
 import 'remote_config.dart';
 import 'storage_service.dart';
 
-/// The community feed: stories tailored to what this couple is actually
-/// carrying.
+/// The community feed: mostly other people's lives, with the occasional one
+/// on ground the couple is standing on themselves.
 ///
-/// Generated ON DEVICE from [MemoryStore] and kept there. Nothing about the
+/// Generated ON DEVICE and kept there. All it takes from [MemoryStore] is
+/// which broad subjects their life touches — see [CommunityPrompt.themesIn]. Nothing about the
 /// couple's struggles is stored anywhere but their phone, and no post is ever
 /// sent anywhere — the feed is private to them even though it reads as a
 /// group. That is a deliberate constraint, not an implementation detail: the
@@ -271,7 +272,10 @@ class CommunityService extends ChangeNotifier {
       try {
         final raw = await _ai.ask(
           userMessage: CommunityPrompt.task(
-            memoryBlock: MemoryStore.instance.promptBlock(),
+            // Broad subjects only. The memory itself never reaches the model
+            // that writes these.
+            themes: CommunityPrompt.themesIn(
+                MemoryStore.instance.items.map((m) => m.text).join('\n')),
             count: count,
             // Rotates the subjects so today's batch cannot repeat yesterday's.
             dayIndex: _dayIndex(DateTime.now()),
@@ -285,9 +289,10 @@ class CommunityService extends ChangeNotifier {
           maxTokens: 6000,
           timeout: const Duration(seconds: 60),
           workingMessage: 'Finding people who have been here…',
-          // These are not EXODUS answering the couple, so how they asked to
-          // be answered has no business in them.
+          // These are not EXODUS answering the couple, so neither what it
+          // knows about them nor how they asked to be answered belongs here.
           customInstructions: false,
+          memory: false,
         );
 
         final posts = _parse(raw);

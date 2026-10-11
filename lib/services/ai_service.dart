@@ -189,6 +189,11 @@ class AiService {
     /// EXODUS says to them in its own voice. Off where the output is not
     /// EXODUS speaking to them at all, so "call me Dani" cannot leak into it.
     bool customInstructions = true,
+
+    /// Whether what EXODUS remembers about the couple goes in the system
+    /// prompt. Off for the community feed: a story cannot echo a detail the
+    /// model writing it never saw.
+    bool memory = true,
   }) async {
     lastFinishReason = null;
     final provider = MasterPrompt.activeProvider;
@@ -210,7 +215,8 @@ class AiService {
         stream: false,
         images: images,
         maxTokens: maxTokens,
-        customInstructions: customInstructions));
+        customInstructions: customInstructions,
+        memory: memory));
 
     // Hard timeout (no infinite hang) + retry on transient network/TLS errors.
     http.Response response;
@@ -279,6 +285,7 @@ class AiService {
     int? maxTokens,
     bool conversational = false,
     bool customInstructions = true,
+    bool memory = true,
   }) {
     // Build the current user turn. With attachments it uses the multimodal
     // parts array (text + image_url blocks); without, a plain string.
@@ -312,7 +319,7 @@ class AiService {
       {
         'role': 'system',
         'content': MasterPrompt.build() +
-            MemoryStore.instance.promptBlock() +
+            (memory ? MemoryStore.instance.promptBlock() : '') +
             systemExtra +
             (customInstructions
                 ? instructions.promptBlock(shaped: !conversational)
