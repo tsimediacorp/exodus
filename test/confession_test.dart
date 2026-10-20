@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:exodus/config/confession_prompt.dart';
 import 'package:exodus/models/confession.dart';
+import 'package:exodus/services/confession_service.dart';
 
 void main() {
   group('Confession', () {
@@ -56,6 +58,30 @@ void main() {
       final c = Confession.now('  spoken  ');
       expect(c.prayer, isEmpty);
       expect(c.isFallback, isFalse);
+    });
+  });
+  group('ConfessionPrompt', () {
+    // Every prayer came back as "Father, we come before You with a heart that
+    // has been broken by…" over 1 John 1:9, the verse the format line named as
+    // its example.
+    test('names no example passage for the model to copy', () {
+      expect(ConfessionPrompt.task('x'), isNot(contains('1 John')));
+    });
+
+    test('steers away from recent passages and openings', () {
+      final task = ConfessionPrompt.task('x',
+          recentRefs: ['Psalm 51:10'],
+          recentOpenings: ['Lord, You saw what I did']);
+      expect(task, contains('Psalm 51:10'));
+      expect(task, contains('Lord, You saw what I did'));
+      expect(ConfessionPrompt.task('x'), isNot(contains('Do not reuse')));
+    });
+
+    test('only the first words of a past prayer are sent', () {
+      expect(
+          ConfessionService.opening(
+              'Father, the lie about last night sits heavy on him now.'),
+          'Father, the lie about last night');
     });
   });
 }
