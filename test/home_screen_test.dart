@@ -4,9 +4,19 @@ import 'package:exodus/screens/home_screen.dart';
 import 'package:exodus/theme/exodus_theme.dart';
 import 'package:exodus/widgets/exodus_bottom_nav.dart';
 
+import 'support/real_fonts.dart';
+
 void main() {
+  setUpAll(loadRealFonts);
+
   Future<void> open(WidgetTester tester,
       {ValueChanged<String>? onOpen, VoidCallback? onNew}) async {
+    // These are the phone layout's tests. The default test surface (800pt)
+    // is wider than a phone and now gets the unfolded two-column Home, which
+    // test/duo_layout_test.dart covers; pin an iPhone Pro Max here.
+    tester.view.devicePixelRatio = 3;
+    tester.view.physicalSize = const Size(440, 956) * 3;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: ExodusTheme.build(),
       home: HomeScreen(

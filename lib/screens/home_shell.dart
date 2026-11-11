@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import '../layout/exodus_layout.dart';
 import '../services/notification_service.dart';
+import '../services/storage_service.dart';
 import '../services/analytics.dart';
+import '../theme/exodus_theme.dart';
 import '../widgets/exodus_bottom_nav.dart';
+import '../widgets/exodus_nav_rail.dart';
 import '../widgets/notification_primer.dart';
+import '../widgets/unfold_reveal.dart';
 import 'chat_screen.dart';
 import 'conversations_screen.dart';
 import 'coaching_screen.dart';
@@ -56,6 +61,9 @@ class _HomeShellState extends State<HomeShell> {
   /// The bottom bar shows no selection while a mode is open — none of its four
   /// tabs is where you are, and lighting one would be a lie.
   int? get _selectedTab => _index < _modeBase ? _index : null;
+
+  /// The open mode, for the rail, which can show modes as well as tabs.
+  int? get _selectedMode => _index >= _modeBase ? _index - _modeBase : null;
 
   @override
   void initState() {
@@ -168,6 +176,50 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final expanded = ExodusLayout.isExpanded(context);
+
+    // The stack is built once and handed to whichever frame fits, so folding
+    // or unfolding the phone never rebuilds a screen from scratch: a half
+    // typed message, a scroll position, a Bible page all survive the change.
+    // The GlobalKey on the stack is what makes that true across the two
+    // different parent trees below.
+    final stack = IndexedStack(
+      key: _stackKey,
+      index: _index,
+      children: [
+        // ---- Tabs 0..3 ----
+        HomeScreen(
+          key: _homeKey,
+          onOpenMenu: _goHome,
+          onOpenConversation: _openConversation,
+          onNewConversation: _newConversation,
+          onSeeAll: _openConversationsList,
+        ),
+        ExploreScreen(onOpenMode: _goToMode),
+        const LibraryScreen(),
+        ProfileScreen(onOpenTogether: () => _goToMode(_togetherMode)),
+
+        // ---- Modes, from _modeBase. Order must match ExploreScreen. ----
+        ChatScreen(key: _chatKey, onOpenMenu: _goHome),
+        CoachingScreen(onOpenMenu: _goHome),
+        DevotionalScreen(onOpenMenu: _goHome),
+        StudyScreen(
+            onOpenMenu: _goHome,
+            isActive: _index == _modeBase + 3),
+        ConfessionalScreen(onOpenMenu: _goHome),
+        TogetherScreen(onOpenMenu: _goHome),
+      ],
+    );
+
+    return UnfoldReveal(
+      child: expanded ? _expandedFrame(stack) : _compactFrame(stack),
+    );
+  }
+
+  final GlobalKey _stackKey = GlobalKey(debugLabel: 'shell-stack');
+
+  /// Folded: exactly the app as it has always been.
+  Widget _compactFrame(Widget stack) {
     return Scaffold(
       key: _scaffoldKey,
       bottomNavigationBar: ExodusBottomNav(
@@ -175,32 +227,68 @@ class _HomeShellState extends State<HomeShell> {
         onSelect: _goToTab,
         onNewChat: _newConversation,
       ),
-      body: IndexedStack(
-        index: _index,
-        children: [
-          // ---- Tabs 0..3 ----
-          HomeScreen(
-            key: _homeKey,
-            onOpenMenu: _goHome,
-            onOpenConversation: _openConversation,
-            onNewConversation: _newConversation,
-            onSeeAll: _openConversationsList,
-          ),
-          ExploreScreen(onOpenMode: _goToMode),
-          const LibraryScreen(),
-          ProfileScreen(onOpenTogether: () => _goToMode(_togetherMode)),
+      body: stack,
+    );
+  }
 
-          // ---- Modes, from _modeBase. Order must match ExploreScreen. ----
-          ChatScreen(key: _chatKey, onOpenMenu: _goHome),
-          CoachingScreen(onOpenMenu: _goHome),
-          DevotionalScreen(onOpenMenu: _goHome),
-          StudyScreen(
-              onOpenMenu: _goHome,
-              isActive: _index == _modeBase + 3),
-          ConfessionalScreen(onOpenMenu: _goHome),
-          TogetherScreen(onOpenMenu: _goHome),
+  /// Unfolded: the rail down the leading edge. With the room for it (the
+  /// inner screen held sideways), Counsel also gains its conversation list
+  /// beside the thread — list and message together, the way Mail opens up.
+  Widget _expandedFrame(Widget stack) {
+    final showList = _index == _counselIndex &&
+        ExodusLayout.hasRoomForTwoPanes(context);
+    return Scaffold(
+      key: _scaffoldKey,
+      body: Row(
+        children: [
+          ExodusNavRail(
+            selectedTab: _selectedTab,
+            selectedMode: _selectedMode,
+            onSelectTab: _goToTab,
+            onSelectMode: _goToMode,
+            onNewChat: _newConversation,
+          ),
+          // The list slides in from under the rail rather than appearing, so
+          // arriving in Counsel reads as the room opening up.
+          ClipRect(
+            child: AnimatedAlign(
+              alignment: Alignment.centerLeft,
+              widthFactor: showList ? 1 : 0,
+              duration: ExodusLayout.reduceMotion(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 420),
+              curve: Curves.easeOutCubic,
+              child: SizedBox(
+                width: _listPaneWidth,
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    border: Border(
+                        right: BorderSide(color: ExodusTheme.steel)),
+                  ),
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: StorageService.instance.conversationsRevision,
+                    builder: (context, _, __) => ConversationsScreen(
+                      embedded: true,
+                      selectedId: _chatKey.currentState?.currentId,
+                      onOpen: _openConversation,
+                      onNew: _newConversation,
+                      onDelete: (id) {
+                        _chatKey.currentState?.deleteConversationById(id);
+                        setState(() {});
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(child: stack),
         ],
       ),
     );
   }
+
+  /// Wide enough for a title and two lines of preview; narrow enough that
+  /// the thread beside it keeps a comfortable reading measure on the Duo.
+  static const double _listPaneWidth = 268;
 }

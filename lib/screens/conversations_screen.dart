@@ -17,11 +17,21 @@ class ConversationsScreen extends StatefulWidget {
   final VoidCallback onNew;
   final ValueChanged<String> onDelete;
 
+  /// True when this sits beside the thread on the unfolded screen rather
+  /// than being pushed over it. Embedded, it never pops (there is nothing
+  /// to pop back to), drops the back button, and marks the open thread.
+  final bool embedded;
+
+  /// The conversation open in the thread beside this list, when [embedded].
+  final String? selectedId;
+
   const ConversationsScreen({
     super.key,
     required this.onOpen,
     required this.onNew,
     required this.onDelete,
+    this.embedded = false,
+    this.selectedId,
   });
 
   @override
@@ -57,6 +67,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     return Scaffold(
       backgroundColor: ExodusTheme.obsidian,
       appBar: AppBar(
+        automaticallyImplyLeading: !widget.embedded,
+        centerTitle: !widget.embedded,
         title: const Text('Conversations',
             style: TextStyle(
               fontFamily: ExodusTheme.serif,
@@ -71,7 +83,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 color: ExodusTheme.brass, size: 24),
             tooltip: 'New conversation',
             onPressed: () {
-              Navigator.of(context).pop();
+              if (!widget.embedded) Navigator.of(context).pop();
               widget.onNew();
             },
           ),
@@ -82,7 +94,9 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                padding: widget.embedded
+                    ? const EdgeInsets.fromLTRB(12, 4, 12, 12)
+                    : const EdgeInsets.fromLTRB(20, 4, 20, 12),
                 child: Container(
                   height: 48,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -125,7 +139,9 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 child: conversations.isEmpty
                     ? _empty()
                     : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                        padding: widget.embedded
+                            ? const EdgeInsets.fromLTRB(12, 0, 12, 24)
+                            : const EdgeInsets.fromLTRB(20, 0, 20, 24),
                         itemCount: conversations.length,
                         itemBuilder: (_, i) => _tile(conversations[i]),
                       ),
@@ -153,6 +169,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   }
 
   Widget _tile(Conversation conv) {
+    final isOpen = widget.embedded && conv.id == widget.selectedId;
     final preview = conv.messages.isEmpty
         ? 'No messages yet'
         : conv.messages.last.content.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -200,14 +217,21 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () {
-            Navigator.of(context).pop();
+            if (!widget.embedded) Navigator.of(context).pop();
             widget.onOpen(conv.id);
           },
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOut,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: ExodusTheme.midnight.withValues(alpha: 0.72),
-              border: Border.all(color: ExodusTheme.steel),
+              color: isOpen
+                  ? ExodusTheme.brass.withValues(alpha: 0.10)
+                  : ExodusTheme.midnight.withValues(alpha: 0.72),
+              border: Border.all(
+                  color: isOpen
+                      ? ExodusTheme.brass.withValues(alpha: 0.55)
+                      : ExodusTheme.steel),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../layout/exodus_layout.dart';
 
 import '../models/conversation.dart';
 import '../services/bible_service.dart';
@@ -91,65 +92,140 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final conversations = _conversations;
+    final expanded = ExodusLayout.isExpanded(context);
+
+    final welcome = <Widget>[
+      _header(),
+      const SizedBox(height: 22),
+      Text('Peace be with you.',
+          style: TextStyle(
+            fontFamily: ExodusTheme.serif,
+            color: ExodusTheme.parchment,
+            fontSize: expanded ? 38 : 32,
+            fontWeight: FontWeight.w600,
+            height: 1.15,
+            letterSpacing: -0.4,
+          )),
+      const SizedBox(height: 8),
+      const Text('Real conversations. A higher perspective.',
+          style: TextStyle(
+            color: ExodusTheme.ironMist,
+            fontSize: 15,
+            letterSpacing: 0.2,
+          )),
+      const SizedBox(height: 22),
+      // Above the verse on purpose: on a hard morning, knowing someone
+      // else is in it lands before scripture does.
+      const CommunityStrip(),
+      const SizedBox(height: 20),
+      _verseCard(),
+    ];
+
+    final threads = <Widget>[
+      _searchField(),
+      const SizedBox(height: 22),
+      _conversationsHeader(conversations.length),
+      const SizedBox(height: 12),
+      if (conversations.isEmpty)
+        _emptyConversations()
+      else
+        Arrival(
+          // Settles once on open; scrolling the list never replays it.
+          enabled: _query.isEmpty,
+          step: const Duration(milliseconds: 70),
+          children: [
+            // Unfolded there is room for the whole recent list, not just
+            // the first screenful.
+            for (final c in conversations.take(expanded ? 14 : 8))
+              _conversationTile(c),
+          ],
+        ),
+    ];
 
     return Scaffold(
       backgroundColor: ExodusTheme.obsidian,
       body: PageBackdrop(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            children: [
-              _header(),
-              const SizedBox(height: 22),
-              const Text('Peace be with you.',
-                  style: TextStyle(
-                    fontFamily: ExodusTheme.serif,
-                    color: ExodusTheme.parchment,
-                    fontSize: 32,
-                    fontWeight: FontWeight.w600,
-                    height: 1.15,
-                    letterSpacing: -0.4,
-                  )),
-              const SizedBox(height: 8),
-              const Text('Real conversations. A higher perspective.',
-                  style: TextStyle(
-                    color: ExodusTheme.ironMist,
-                    fontSize: 15,
-                    letterSpacing: 0.2,
-                  )),
-              const SizedBox(height: 22),
-              // Above the verse on purpose: on a hard morning, knowing someone
-              // else is in it lands before scripture does.
-              const CommunityStrip(),
-              const SizedBox(height: 20),
-              _verseCard(),
-              const SizedBox(height: 18),
-              _searchField(),
-              const SizedBox(height: 22),
-              _conversationsHeader(conversations.length),
-              const SizedBox(height: 12),
-              if (conversations.isEmpty)
-                _emptyConversations()
-              else
-                Arrival(
-                  // Settles once on open; scrolling the list never replays it.
-                  enabled: _query.isEmpty,
-                  step: const Duration(milliseconds: 70),
-                  children: [
-                    for (final c in conversations.take(8)) _conversationTile(c),
-                  ],
-                ),
-            ],
-          ),
+          // Measured against the room Home actually has, not the screen:
+          // beside the rail on the upright inner screen that is ~577pt, and
+          // two columns there would each be narrower than the folded phone.
+          child: LayoutBuilder(builder: (context, constraints) {
+            if (constraints.maxWidth >= _twoColumnMinWidth) {
+              return _twoColumns(welcome, threads);
+            }
+            // One column, with the margins the larger screen can afford.
+            final side = expanded ? 32.0 : 20.0;
+            return ListView(
+              padding: EdgeInsets.fromLTRB(side, 8, side, 24),
+              children: [
+                ...welcome,
+                const SizedBox(height: 18),
+                ...threads,
+              ],
+            );
+          }),
         ),
       ),
     );
   }
 
+  static const double _twoColumnMinWidth = 640;
+
+  /// Unfolded: what is said to you on the left, what you have said on the
+  /// right. Each column scrolls on its own, and the gap between them sits
+  /// in the middle so neither column's content falls into the fold.
+  Widget _twoColumns(List<Widget> left, List<Widget> right) {
+    const gutter = ExodusLayout.centreGutter;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 11,
+          // A vertical list only clips along its own axis, and the community
+          // strip scrolls sideways: without this its cards slide under the
+          // conversations column.
+          child: ClipRect(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 8, gutter / 2, 28),
+              children: left,
+            ),
+          ),
+        ),
+        Container(
+          width: 1,
+          margin: const EdgeInsets.symmetric(vertical: 28),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                ExodusTheme.steel.withValues(alpha: 0),
+                ExodusTheme.steel,
+                ExodusTheme.steel.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          flex: 10,
+          child: ListView(
+            // Line the search up with the greeting's baseline region rather
+            // than with the logo, so the two columns read as one page.
+            padding: const EdgeInsets.fromLTRB(gutter / 2, 70, 24, 28),
+            children: right,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _header() {
+    // Unfolded, the rail already carries the shield a few points to the
+    // left; a second one beside it reads as a stutter.
+    final showShield = !ExodusLayout.isExpanded(context);
     return Row(
       children: [
-        Semantics(
+        if (showShield) Semantics(
           button: true,
           label: 'Menu',
           child: InkWell(
@@ -161,7 +237,7 @@ class HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        if (showShield) const SizedBox(width: 12),
         const Text('EXODUS',
             style: TextStyle(
               color: ExodusTheme.brass,
