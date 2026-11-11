@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/bible_books.dart';
+import '../layout/exodus_layout.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
 import '../services/bible_paginator.dart';
@@ -9,6 +10,7 @@ import '../services/bible_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
+import '../widgets/book_spread.dart';
 import '../widgets/page_flip.dart';
 import '../widgets/progress_view.dart';
 import '../widgets/verse_card.dart';
@@ -112,7 +114,11 @@ class _BibleScreenState extends State<BibleScreen> {
     // Jump after the frame — the controller has no clients until PageView
     // has been laid out.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) return;
+      if (!mounted) return;
+      // Pages are measured during layout, after the footer has already been
+      // built, so the footer needs one more pass to show the new count.
+      setState(() {});
+      if (!_pageController.hasClients) return;
       if (_pageController.page?.round() != _pageIndex) {
         _pageController.jumpToPage(_pageIndex);
       }
@@ -677,6 +683,32 @@ class _BibleScreenState extends State<BibleScreen> {
               // a rotation or an accessibility change must not leave verses
               // stranded off the bottom of a page.
               final scaler = MediaQuery.textScalerOf(context);
+
+              // Unfolded, the reader becomes an open book: two facing pages
+              // with the spine on the fold. Each page is measured at half
+              // the width, less its own margins.
+              _spreads = ExodusLayout.isExpanded(context);
+              if (_spreads) {
+                final area = Size(
+                  constraints.maxWidth / 2 - _spreadOuter - _spreadInner,
+                  constraints.maxHeight - 64,
+                );
+                _repaginate(verses, area, scaler);
+                return BookSpread(
+                  pageCount: _pages.length,
+                  spread: _pageIndex ~/ 2,
+                  reduceMotion: ExodusLayout.reduceMotion(context),
+                  onSpreadChanged: (s) {
+                    setState(() => _pageIndex =
+                        (s * 2).clamp(0, _pages.length - 1));
+                  },
+                  pageBuilder: (context, i) => _spreadPage(
+                      _pages[i], verses,
+                      isLeft: i.isEven, number: i + 1),
+                  blankBuilder: (context) => _endPage(),
+                );
+              }
+
               final area = Size(
                 constraints.maxWidth - 40, // horizontal padding
                 constraints.maxHeight - 56, // vertical padding + footer
@@ -719,6 +751,118 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
+  /// True while the reader is showing facing pages (unfolded).
+  bool _spreads = false;
+
+  /// Page margins in a spread: wider at the spine than at the fore-edge,
+  /// as in a printed book, so no verse runs into the fold.
+  static const double _spreadOuter = 22;
+  static const double _spreadInner = 30;
+
+  /// One page of a spread, with a running head and folio like a printed
+  /// Bible: the book and chapter at the top, the page number at the foot.
+  Widget _spreadPage(BiblePage page, List<String> verses,
+      {required bool isLeft, required int number}) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+          end: isLeft ? Alignment.centerRight : Alignment.centerLeft,
+          colors: [
+            ExodusTheme.obsidian,
+            Color.lerp(ExodusTheme.obsidian, ExodusTheme.midnight, 0.9)!,
+          ],
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        isLeft ? _spreadOuter : _spreadInner,
+        10,
+        isLeft ? _spreadInner : _spreadOuter,
+        8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 22,
+            child: Align(
+              alignment:
+                  isLeft ? Alignment.centerLeft : Alignment.centerRight,
+              child: Text(
+                '$_bookName $_chapter'.toUpperCase(),
+                style: TextStyle(
+                  color: ExodusTheme.brass.withValues(alpha: 0.75),
+                  fontSize: 10,
+                  letterSpacing: 2.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (var v = page.firstVerse; v <= page.lastVerse; v++)
+            if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
+          const Spacer(),
+          Align(
+            alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+            child: Text('$number',
+                style: const TextStyle(
+                  fontFamily: ExodusTheme.serif,
+                  color: ExodusTheme.ironMist,
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  fontFeatures: [FontFeature.oldstyleFigures()],
+                )),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The facing page when a chapter ends on a left-hand page: an ornament
+  /// and the way on, rather than an empty rectangle.
+  Widget _endPage() {
+    final hasNext =
+        _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
+    return Container(
+      color: Color.lerp(ExodusTheme.obsidian, ExodusTheme.midnight, 0.5),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('\u2766',
+              style: TextStyle(
+                  color: ExodusTheme.brass.withValues(alpha: 0.7),
+                  fontSize: 28)),
+          const SizedBox(height: 12),
+          Text('End of $_bookName $_chapter',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: ExodusTheme.serif,
+                color: ExodusTheme.parchment,
+                fontSize: 17,
+                fontStyle: FontStyle.italic,
+              )),
+          if (hasNext) ...[
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: () => _changeChapter(1),
+              icon: const Icon(Icons.east_rounded, size: 16),
+              label: const Text('Next chapter'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ExodusTheme.brass,
+                side: BorderSide(
+                    color: ExodusTheme.brass.withValues(alpha: 0.5)),
+                shape: const StadiumBorder(),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// One page of verses, laid out top-aligned like a printed page.
   Widget _pageContent(BiblePage page, List<String> verses) {
     return Container(
@@ -732,6 +876,14 @@ class _BibleScreenState extends State<BibleScreen> {
         ],
       ),
     );
+  }
+
+  String _spreadLabel() {
+    final first = (_pageIndex ~/ 2) * 2 + 1;
+    final last = first + 1 > _pages.length ? first : first + 1;
+    return first == last
+        ? 'Page $first of ${_pages.length}'
+        : 'Pages $first\u2013$last of ${_pages.length}';
   }
 
   /// Page position plus chapter stepping, so the couple is never stuck at the
@@ -756,7 +908,9 @@ class _BibleScreenState extends State<BibleScreen> {
             child: Text(
               _pages.length <= 1
                   ? '$_bookName $_chapter'
-                  : 'Page ${_pageIndex + 1} of ${_pages.length}',
+                  : _spreads
+                      ? _spreadLabel()
+                      : 'Page ${_pageIndex + 1} of ${_pages.length}',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: ExodusTheme.ironMist,

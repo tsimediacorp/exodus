@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/master_prompt.dart';
 import '../models/chat_message.dart';
@@ -158,12 +159,18 @@ class StorageService {
     }
   }
 
+  /// Bumped whenever the conversation list or the open conversation
+  /// changes, so a list that stays on screen beside the thread (the unfolded
+  /// layout) can follow along instead of going stale.
+  final ValueNotifier<int> conversationsRevision = ValueNotifier<int>(0);
+
   Future<void> saveConversations(List<Conversation> conversations) async {
     final p = _prefs;
     if (p == null) return;
     final encoded =
         jsonEncode(conversations.map((c) => c.toJson()).toList());
     await p.setString(_kConversations, encoded);
+    conversationsRevision.value++;
   }
 
   String? getCurrentConversationId() => _prefs?.getString(_kCurrentConvId);
@@ -176,6 +183,7 @@ class StorageService {
     } else {
       await p.setString(_kCurrentConvId, id);
     }
+    conversationsRevision.value++;
   }
 
   // ---------------- Coaching sessions ----------------
