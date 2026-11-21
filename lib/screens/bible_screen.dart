@@ -5,12 +5,14 @@ import '../config/bible_books.dart';
 import '../layout/exodus_layout.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
+import '../services/bible_marks.dart';
 import '../services/bible_paginator.dart';
 import '../services/bible_service.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/book_spread.dart';
+import '../widgets/ink_layer.dart';
 import '../widgets/page_flip.dart';
 import '../widgets/progress_view.dart';
 import '../widgets/verse_card.dart';
@@ -61,6 +63,22 @@ class _BibleScreenState extends State<BibleScreen> {
   /// 1-based verse numbers the couple has tapped to select.
   final Set<int> _selected = <int>{};
 
+  // ---- Study: highlights, notes, ink ----
+
+  final BibleMarks _marks = BibleMarks.instance;
+
+  /// The pen, the eraser, or neither. While either is out, the page is for
+  /// drawing: swipes draw instead of turning, taps do not select.
+  InkTool _tool = InkTool.off;
+  int _inkColor = 0;
+
+  /// Reading mode: every control hidden, nothing on the glass but the page.
+  bool _immersive = false;
+
+  void _onMarksChanged() {
+    if (mounted) setState(() {});
+  }
+
   // ---- Paged reading ----
 
   /// Page mode is the default — the reader is meant to feel like a book.
@@ -89,7 +107,10 @@ class _BibleScreenState extends State<BibleScreen> {
 
     final pages = BiblePaginator.paginate(
       verses: verses,
-      size: area,
+      // Measured at the width the words actually get: each verse row is
+      // padded 8pt either side, and measuring at the full page width let
+      // lines wrap later on paper than on screen, so a full page overflowed.
+      size: Size(area.width - _verseRowInset, area.height),
       verseTextStyle: _verseTextStyle,
       verseNumberStyle: _verseNumberStyle,
       verseSpacing: _verseSpacing,
@@ -102,9 +123,8 @@ class _BibleScreenState extends State<BibleScreen> {
         (_pages.isEmpty || _pageIndex >= _pages.length
             ? null
             : _pages[_pageIndex].firstVerse);
-    final target = anchor == null
-        ? 0
-        : BiblePaginator.pageIndexOf(pages, anchor);
+    final target =
+        anchor == null ? 0 : BiblePaginator.pageIndexOf(pages, anchor);
 
     _pages = pages;
     _pageIndex = target.clamp(0, pages.length - 1);
@@ -164,15 +184,23 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Must match the vertical space _verseRow adds around each verse.
   static const double _verseSpacing = 16;
 
+  /// Must match the horizontal padding _verseRow puts around the text.
+  static const double _verseRowInset = 16;
+
   @override
   void initState() {
     super.initState();
     _note = widget.note;
+    _marks.addListener(_onMarksChanged);
     _open();
   }
 
   @override
   void dispose() {
+    _marks.removeListener(_onMarksChanged);
+    if (_immersive) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
     _scroll.dispose();
     _pageController.dispose();
     _status.dispose();
@@ -189,9 +217,8 @@ class _BibleScreenState extends State<BibleScreen> {
       await _bible.load();
       if (!mounted) return;
       _status.done();
-      final target = widget.initialRef == null
-          ? null
-          : _bible.resolve(widget.initialRef!);
+      final target =
+          widget.initialRef == null ? null : _bible.resolve(widget.initialRef!);
       setState(() {
         _loading = false;
         if (target != null) {
@@ -246,8 +273,9 @@ class _BibleScreenState extends State<BibleScreen> {
     });
   }
 
-  List<String> get _verses =>
-      _bible.books.isEmpty ? const [] : _bible.books[_bookIndex].verses(_chapter);
+  List<String> get _verses => _bible.books.isEmpty
+      ? const []
+      : _bible.books[_bookIndex].verses(_chapter);
 
   /// What each verse actually shows.
   ///
@@ -393,8 +421,7 @@ class _BibleScreenState extends State<BibleScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             style: FilledButton.styleFrom(
@@ -437,6 +464,233 @@ class _BibleScreenState extends State<BibleScreen> {
       builder: (_) =>
           VerseCardSheet(reference: _bible.label(ref), text: _selectionText),
     );
+  }
+
+  // ---------------- Study ----------------
+
+  ChapterMarks get _chapterMarks => _marks.chapter(_bookIndex, _chapter);
+
+  Future<void> _highlightSelection(int? color) async {
+    if (_selected.isEmpty) return;
+    HapticFeedback.selectionClick();
+    await _marks.highlight(_bookIndex, _chapter, _selected.toList(), color);
+    if (mounted) setState(() => _selected.clear());
+  }
+
+  /// Write or edit the note on [verse].
+  Future<void> _editNote(int verse) async {
+    final existing = _chapterMarks.notes[verse] ?? '';
+    final controller = TextEditingController(text: existing);
+    final ref =
+        BibleRef(bookIndex: _bookIndex, chapter: _chapter, verseStart: verse);
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ExodusTheme.midnight,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            22, 20, 22, 16 + MediaQuery.viewInsetsOf(ctx).bottom),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.edit_note_rounded,
+                      color: ExodusTheme.brass, size: 20),
+                  const SizedBox(width: 8),
+                  Text(_bible.label(ref),
+                      style: const TextStyle(
+                        color: ExodusTheme.brass,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                      )),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _displayVerses.length >= verse ? _displayVerses[verse - 1] : '',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: ExodusTheme.serif,
+                  color: ExodusTheme.ironMist,
+                  fontSize: 14,
+                  fontStyle: FontStyle.italic,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                minLines: 3,
+                maxLines: 8,
+                style: const TextStyle(
+                    fontFamily: ExodusTheme.serif,
+                    color: ExodusTheme.parchment,
+                    fontSize: 16,
+                    height: 1.5),
+                decoration: const InputDecoration(
+                  hintText: 'What is this verse saying to you?',
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (existing.isNotEmpty)
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, ''),
+                      child: const Text('Delete note',
+                          style: TextStyle(color: ExodusTheme.crimson)),
+                    ),
+                  const Spacer(),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: ExodusTheme.brass,
+                        foregroundColor: ExodusTheme.obsidian),
+                    onPressed: () => Navigator.pop(ctx, controller.text),
+                    child: const Text('Save'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+    if (result == null || !mounted) return;
+    await _marks.setNote(_bookIndex, _chapter, verse, result);
+    if (mounted) setState(() => _selected.clear());
+  }
+
+  /// Every note in the Bible, grouped by where it is; tapping one goes there.
+  Future<void> _showNotes() async {
+    final notes = _marks.allNotes();
+    final target =
+        await showModalBottomSheet<({int book, int chapter, int verse})>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ExodusTheme.midnight,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.92,
+        builder: (ctx, scroll) => notes.isEmpty
+            ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Text(
+                    'No notes yet. Select a verse and tap Note to write '
+                    'one in the margin.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: ExodusTheme.ironMist, height: 1.5),
+                  ),
+                ),
+              )
+            : ListView.builder(
+                controller: scroll,
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                itemCount: notes.length + 1,
+                itemBuilder: (ctx, i) {
+                  if (i == 0) {
+                    return const Padding(
+                      padding: EdgeInsets.only(bottom: 14),
+                      child: Text('Your notes',
+                          style: TextStyle(
+                            fontFamily: ExodusTheme.serif,
+                            color: ExodusTheme.parchment,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    );
+                  }
+                  final n = notes[i - 1];
+                  final label = _bible.label(BibleRef(
+                      bookIndex: n.book,
+                      chapter: n.chapter,
+                      verseStart: n.verse));
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => Navigator.pop(ctx,
+                        (book: n.book, chapter: n.chapter, verse: n.verse)),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: ExodusTheme.obsidian.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: ExodusTheme.steel),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(label,
+                              style: const TextStyle(
+                                color: ExodusTheme.brass,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.6,
+                              )),
+                          const SizedBox(height: 6),
+                          Text(n.text,
+                              style: const TextStyle(
+                                fontFamily: ExodusTheme.serif,
+                                color: ExodusTheme.porcelain,
+                                fontSize: 15,
+                                height: 1.5,
+                              )),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    _goTo(target.book, target.chapter);
+    setState(() {
+      _highlight = BibleRef(
+          bookIndex: target.book,
+          chapter: target.chapter,
+          verseStart: target.verse);
+      _pendingVerseJump = target.verse;
+    });
+    _scrollToHighlight();
+  }
+
+  void _setTool(InkTool tool) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _tool = tool;
+      _selected.clear();
+    });
+  }
+
+  Future<void> _undoInk() async {
+    final ink = _chapterMarks.ink;
+    if (ink.isEmpty) return;
+    HapticFeedback.selectionClick();
+    await _marks.removeStroke(_bookIndex, _chapter, ink.last.id);
+  }
+
+  Future<void> _toggleImmersive() async {
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _immersive = !_immersive;
+      _selected.clear();
+    });
+    await SystemChrome.setEnabledSystemUIMode(
+        _immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge);
   }
 
   /// Let the reader change translation. Only offered when more than one is
@@ -497,8 +751,7 @@ class _BibleScreenState extends State<BibleScreen> {
                             const SizedBox(height: 3),
                             Text(t.note,
                                 style: const TextStyle(
-                                    color: ExodusTheme.ironMist,
-                                    fontSize: 11)),
+                                    color: ExodusTheme.ironMist, fontSize: 11)),
                           ],
                         ),
                       ),
@@ -549,69 +802,290 @@ class _BibleScreenState extends State<BibleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final drawing = _tool != InkTool.off;
     return Scaffold(
-      appBar: AppBar(
-        title: _loading
-            ? const Text('Bible')
-            : Semantics(
-                button: true,
-                label: 'Change book and chapter',
-                child: InkWell(
-                  onTap: _pickBook,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text('$_bookName $_chapter',
-                            overflow: TextOverflow.ellipsis),
+      // Reading mode takes the bar away entirely; the page runs to the top.
+      appBar: _immersive
+          ? null
+          : AppBar(
+              title: _loading
+                  ? const Text('Bible')
+                  : Semantics(
+                      button: true,
+                      label: 'Change book and chapter',
+                      child: InkWell(
+                        onTap: _pickBook,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text('$_bookName $_chapter',
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                            const Icon(Icons.arrow_drop_down,
+                                color: ExodusTheme.ironMist),
+                          ],
+                        ),
                       ),
-                      const Icon(Icons.arrow_drop_down,
-                          color: ExodusTheme.ironMist),
-                    ],
+                    ),
+              actions: [
+                if (BibleService.hasChoice)
+                  Semantics(
+                    button: true,
+                    label: 'Change translation',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: _loading ? null : _pickTranslation,
+                      child: Container(
+                        constraints:
+                            const BoxConstraints(minHeight: 44, minWidth: 44),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Text(BibleService.translation,
+                            style: const TextStyle(
+                              color: ExodusTheme.brass,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            )),
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  tooltip: drawing ? 'Put the pen down' : 'Draw on the page',
+                  icon: Icon(
+                      drawing ? Icons.edit_off_rounded : Icons.draw_outlined,
+                      color:
+                          drawing ? ExodusTheme.brass : ExodusTheme.ironMist),
+                  onPressed: _loading
+                      ? null
+                      : () => _setTool(drawing ? InkTool.off : InkTool.pen),
+                ),
+                IconButton(
+                  tooltip: 'Ask EXODUS to find a passage',
+                  icon: const Icon(Icons.auto_awesome,
+                      color: ExodusTheme.covenantGlow),
+                  onPressed: _loading ? null : _search,
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'More',
+                  enabled: !_loading,
+                  icon: const Icon(Icons.more_vert_rounded,
+                      color: ExodusTheme.ironMist),
+                  color: ExodusTheme.midnight,
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'read':
+                        _toggleImmersive();
+                      case 'notes':
+                        _showNotes();
+                      case 'mode':
+                        _toggleReadingMode();
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'read',
+                      child: ListTile(
+                        leading: Icon(Icons.chrome_reader_mode_outlined),
+                        title: Text('Reading mode'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'notes',
+                      child: ListTile(
+                        leading: Icon(Icons.sticky_note_2_outlined),
+                        title: Text('Your notes'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'mode',
+                      child: ListTile(
+                        leading: Icon(_paged
+                            ? Icons.view_stream_rounded
+                            : Icons.menu_book_rounded),
+                        title: Text(_paged ? 'Scroll instead' : 'Turn pages'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+      bottomNavigationBar:
+          _selected.isEmpty || drawing ? null : _selectionBar(),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(top: !_immersive, child: _body()),
+          ),
+          // The pen's tools float over the page rather than pushing it up,
+          // so the page does not reflow under the pen as the bar appears.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 260),
+                transitionBuilder: (child, a) => FadeTransition(
+                  opacity: a,
+                  child: SlideTransition(
+                    position:
+                        Tween(begin: const Offset(0, 0.4), end: Offset.zero)
+                            .animate(a),
+                    child: child,
+                  ),
+                ),
+                child: drawing ? _penBar() : const SizedBox.shrink(),
+              ),
+            ),
+          ),
+          // Bottom centre: the one place empty in both layouts, between the
+          // folios and, unfolded, at the foot of the spine.
+          if (_immersive)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Semantics(
+                      button: true,
+                      label: 'Leave reading mode',
+                      child: Material(
+                        color: ExodusTheme.midnight.withValues(alpha: 0.55),
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: _toggleImmersive,
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.fullscreen_exit_rounded,
+                                size: 18, color: ExodusTheme.ironMist),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-        actions: [
-          if (BibleService.hasChoice)
-            Semantics(
-              button: true,
-              label: 'Change translation',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _loading ? null : _pickTranslation,
-                child: Container(
-                  constraints:
-                      const BoxConstraints(minHeight: 44, minWidth: 44),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(BibleService.translation,
-                      style: const TextStyle(
-                        color: ExodusTheme.brass,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.5,
-                      )),
-                ),
-              ),
             ),
-          IconButton(
-            tooltip: _paged ? 'Switch to scrolling' : 'Switch to pages',
-            icon: Icon(
-                _paged ? Icons.menu_book_rounded : Icons.view_stream_rounded,
-                color: ExodusTheme.ironMist),
-            onPressed: _loading ? null : _toggleReadingMode,
-          ),
-          IconButton(
-            tooltip: 'Ask EXODUS to find a passage',
-            icon: const Icon(Icons.auto_awesome, color: ExodusTheme.covenantGlow),
-            onPressed: _loading ? null : _search,
-          ),
         ],
       ),
-      bottomNavigationBar: _selected.isEmpty ? null : _selectionBar(),
-      body: SafeArea(child: _body()),
     );
   }
+
+  /// Ink colours, eraser, undo, done.
+  Widget _penBar() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: ExodusTheme.midnight.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: ExodusTheme.brass.withValues(alpha: 0.35)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < MarkColors.ink.length; i++)
+              Semantics(
+                button: true,
+                selected: _tool == InkTool.pen && _inkColor == i,
+                label: 'Pen colour ${i + 1}',
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _inkColor = i;
+                      _tool = InkTool.pen;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: MarkColors.ink[i],
+                      border: Border.all(
+                        color: _tool == InkTool.pen && _inkColor == i
+                            ? ExodusTheme.porcelain
+                            : Colors.transparent,
+                        width: 2.5,
+                      ),
+                      boxShadow: _tool == InkTool.pen && _inkColor == i
+                          ? [
+                              BoxShadow(
+                                color: MarkColors.ink[i].withValues(alpha: 0.6),
+                                blurRadius: 10,
+                              )
+                            ]
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
+            Container(
+              width: 1,
+              height: 22,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: ExodusTheme.steel,
+            ),
+            IconButton(
+              tooltip: 'Eraser',
+              icon: Icon(Icons.cleaning_services_outlined,
+                  size: 20,
+                  color: _tool == InkTool.eraser
+                      ? ExodusTheme.brass
+                      : ExodusTheme.ironMist),
+              onPressed: () => _setTool(InkTool.eraser),
+            ),
+            IconButton(
+              tooltip: 'Undo',
+              icon: const Icon(Icons.undo_rounded,
+                  size: 20, color: ExodusTheme.ironMist),
+              onPressed: _chapterMarks.ink.isEmpty ? null : _undoInk,
+            ),
+            TextButton(
+              onPressed: () => _setTool(InkTool.off),
+              child: const Text('Done',
+                  style: TextStyle(
+                      color: ExodusTheme.brass, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ink over [child], which lays out verses [first]..[last].
+  Widget _inked(int first, int last, Widget child) => InkLayer(
+        book: _bookIndex,
+        chapter: _chapter,
+        verses: [for (var v = first; v <= last; v++) v],
+        verseKeys: _verseKeys,
+        tool: _tool,
+        inkColor: _inkColor,
+        child: child,
+      );
 
   Widget _body() {
     if (_loading) {
@@ -657,12 +1131,25 @@ class _BibleScreenState extends State<BibleScreen> {
           Expanded(
             child: SingleChildScrollView(
               controller: _scroll,
+              // With the pen out, a vertical drag is a line, not a scroll.
+              physics: _tool == InkTool.off
+                  ? null
+                  : const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (var i = 0; i < verses.length; i++)
-                    _verseRow(i + 1, verses[i]),
+                  _inked(
+                    1,
+                    verses.length,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < verses.length; i++)
+                          _verseRow(i + 1, verses[i]),
+                      ],
+                    ),
+                  ),
                   _chapterNav(),
                 ],
               ),
@@ -697,13 +1184,13 @@ class _BibleScreenState extends State<BibleScreen> {
                 return BookSpread(
                   pageCount: _pages.length,
                   spread: _pageIndex ~/ 2,
+                  interactive: _tool == InkTool.off,
                   reduceMotion: ExodusLayout.reduceMotion(context),
                   onSpreadChanged: (s) {
-                    setState(() => _pageIndex =
-                        (s * 2).clamp(0, _pages.length - 1));
+                    setState(
+                        () => _pageIndex = (s * 2).clamp(0, _pages.length - 1));
                   },
-                  pageBuilder: (context, i) => _spreadPage(
-                      _pages[i], verses,
+                  pageBuilder: (context, i) => _spreadPage(_pages[i], verses,
                       isLeft: i.isEven, number: i + 1),
                   blankBuilder: (context) => _endPage(),
                 );
@@ -719,7 +1206,9 @@ class _BibleScreenState extends State<BibleScreen> {
                 children: [
                   PageView.builder(
                     controller: _pageController,
-                    physics: const PageTurnPhysics(),
+                    physics: _tool == InkTool.off
+                        ? const PageTurnPhysics()
+                        : const NeverScrollableScrollPhysics(),
                     itemCount: _pages.length,
                     onPageChanged: _onPageChanged,
                     itemBuilder: (context, i) {
@@ -746,7 +1235,7 @@ class _BibleScreenState extends State<BibleScreen> {
             },
           ),
         ),
-        _pageFooter(),
+        if (!_immersive) _pageFooter(),
       ],
     );
   }
@@ -786,8 +1275,7 @@ class _BibleScreenState extends State<BibleScreen> {
           SizedBox(
             height: 22,
             child: Align(
-              alignment:
-                  isLeft ? Alignment.centerLeft : Alignment.centerRight,
+              alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
               child: Text(
                 '$_bookName $_chapter'.toUpperCase(),
                 style: TextStyle(
@@ -800,9 +1288,20 @@ class _BibleScreenState extends State<BibleScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          for (var v = page.firstVerse; v <= page.lastVerse; v++)
-            if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
-          const Spacer(),
+          // The whole page takes ink, margins included, not only the lines.
+          Expanded(
+            child: _inked(
+              page.firstVerse,
+              page.lastVerse,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var v = page.firstVerse; v <= page.lastVerse; v++)
+                    if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
+                ],
+              ),
+            ),
+          ),
           Align(
             alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
             child: Text('$number',
@@ -852,8 +1351,8 @@ class _BibleScreenState extends State<BibleScreen> {
               label: const Text('Next chapter'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: ExodusTheme.brass,
-                side: BorderSide(
-                    color: ExodusTheme.brass.withValues(alpha: 0.5)),
+                side:
+                    BorderSide(color: ExodusTheme.brass.withValues(alpha: 0.5)),
                 shape: const StadiumBorder(),
               ),
             ),
@@ -868,12 +1367,16 @@ class _BibleScreenState extends State<BibleScreen> {
     return Container(
       color: ExodusTheme.obsidian,
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var v = page.firstVerse; v <= page.lastVerse; v++)
-            if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
-        ],
+      child: _inked(
+        page.firstVerse,
+        page.lastVerse,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var v = page.firstVerse; v <= page.lastVerse; v++)
+              if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
+          ],
+        ),
       ),
     );
   }
@@ -961,7 +1464,8 @@ class _BibleScreenState extends State<BibleScreen> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: ExodusTheme.covenantBlue.withValues(alpha: 0.15),
-        border: Border.all(color: ExodusTheme.covenantGlow.withValues(alpha: 0.4)),
+        border:
+            Border.all(color: ExodusTheme.covenantGlow.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -983,6 +1487,12 @@ class _BibleScreenState extends State<BibleScreen> {
   Widget _verseRow(int number, String text) {
     final selected = _selected.contains(number);
     final highlighted = _highlight?.covers(number) ?? false;
+    final marks = _chapterMarks;
+    final markColor = marks.highlights[number] == null
+        ? null
+        : MarkColors.highlights[marks.highlights[number]!
+            .clamp(0, MarkColors.highlights.length - 1)];
+    final note = marks.notes[number];
     final key = _verseKeys.putIfAbsent(number, () => GlobalKey());
     return Semantics(
       key: key,
@@ -998,49 +1508,110 @@ class _BibleScreenState extends State<BibleScreen> {
           decoration: BoxDecoration(
             color: selected
                 ? ExodusTheme.covenantBlue.withValues(alpha: 0.28)
-                : highlighted
-                    ? ExodusTheme.brass.withValues(alpha: 0.16)
-                    : Colors.transparent,
+                : markColor != null
+                    ? markColor.withValues(alpha: 0.20)
+                    : highlighted
+                        ? ExodusTheme.brass.withValues(alpha: 0.16)
+                        : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             border: highlighted && !selected
                 ? Border.all(color: ExodusTheme.brass.withValues(alpha: 0.5))
                 : null,
           ),
-          child: RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: '$number ',
-                  style: TextStyle(
-                    color: selected || highlighted
-                        ? ExodusTheme.brass
-                        : ExodusTheme.ironMist,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    height: 1.7,
+          // A marker's edge down the leading side, like a highlighter run
+          // along the margin. Drawn over the row, not as a border, because
+          // a border takes width and the page breaks were measured without
+          // it: the verse would wrap one line longer and overflow the page.
+          foregroundDecoration: markColor != null && !selected
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  gradient: LinearGradient(
+                    stops: const [0, 0.012, 0.012],
+                    colors: [
+                      markColor.withValues(alpha: 0.9),
+                      markColor.withValues(alpha: 0.9),
+                      Colors.transparent,
+                    ],
+                  ),
+                )
+              : null,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              RichText(
+                text: TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '$number ',
+                      style: TextStyle(
+                        color: selected || highlighted
+                            ? ExodusTheme.brass
+                            : ExodusTheme.ironMist,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        height: 1.7,
+                      ),
+                    ),
+                    // An omitted verse keeps its number so every other verse
+                    // still lands where the reader expects, but a bare number with
+                    // nothing after it reads as a rendering bug — so it is set
+                    // apart the way a print Bible footnotes it.
+                    TextSpan(
+                      text: text,
+                      style: _isOmitted(number)
+                          ? const TextStyle(
+                              color: ExodusTheme.ironMist,
+                              fontSize: 14,
+                              height: 1.7,
+                              fontStyle: FontStyle.italic,
+                            )
+                          : const TextStyle(
+                              color: ExodusTheme.porcelain,
+                              fontSize: 16,
+                              height: 1.7,
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              // A note in the margin: a small brass tab on the verse's
+              // corner that opens it. Overlaid rather than inline, so it
+              // never changes how the verse wraps.
+              if (note != null)
+                Positioned(
+                  top: -10,
+                  right: -10,
+                  child: Semantics(
+                    button: true,
+                    label: 'Note on verse $number',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _editNote(number),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: ExodusTheme.midnight,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color:
+                                    ExodusTheme.brass.withValues(alpha: 0.7)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: ExodusTheme.brass.withValues(alpha: 0.3),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.edit_note_rounded,
+                              size: 13, color: ExodusTheme.brass),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                // An omitted verse keeps its number so every other verse
-                // still lands where the reader expects, but a bare number with
-                // nothing after it reads as a rendering bug — so it is set
-                // apart the way a print Bible footnotes it.
-                TextSpan(
-                  text: text,
-                  style: _isOmitted(number)
-                      ? const TextStyle(
-                          color: ExodusTheme.ironMist,
-                          fontSize: 14,
-                          height: 1.7,
-                          fontStyle: FontStyle.italic,
-                        )
-                      : const TextStyle(
-                          color: ExodusTheme.porcelain,
-                          fontSize: 16,
-                          height: 1.7,
-                        ),
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -1064,10 +1635,10 @@ class _BibleScreenState extends State<BibleScreen> {
             label: const Text('Previous'),
           ),
           TextButton.icon(
-            onPressed:
-                (_chapter < _chapterCount || _bookIndex < _bible.books.length - 1)
-                    ? () => _changeChapter(1)
-                    : null,
+            onPressed: (_chapter < _chapterCount ||
+                    _bookIndex < _bible.books.length - 1)
+                ? () => _changeChapter(1)
+                : null,
             style: TextButton.styleFrom(
                 foregroundColor: ExodusTheme.ironMist,
                 minimumSize: const Size(0, 44)),
@@ -1118,6 +1689,8 @@ class _BibleScreenState extends State<BibleScreen> {
                 ),
               ],
             ),
+            _swatches(),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -1139,6 +1712,10 @@ class _BibleScreenState extends State<BibleScreen> {
                     label: 'Ask a question',
                     onTap: _askAbout),
                 _barAction(
+                    icon: Icons.edit_note_rounded,
+                    label: 'Note',
+                    onTap: () => _editNote((_selected.toList()..sort()).first)),
+                _barAction(
                     icon: Icons.bookmark_border_rounded,
                     label: 'Keep verse',
                     onTap: _keepSelection),
@@ -1150,6 +1727,56 @@ class _BibleScreenState extends State<BibleScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Highlight colours for the selection, and a way to clear them.
+  Widget _swatches() {
+    final marks = _chapterMarks;
+    final anyMarked = _selected.any(marks.highlights.containsKey);
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          for (var i = 0; i < MarkColors.highlights.length; i++)
+            Semantics(
+              button: true,
+              label: 'Highlight ${MarkColors.names[i]}',
+              child: GestureDetector(
+                onTap: () => _highlightSelection(i),
+                child: Container(
+                  margin: const EdgeInsets.only(right: 10),
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: MarkColors.highlights[i].withValues(alpha: 0.85),
+                    border: Border.all(
+                        color: ExodusTheme.porcelain.withValues(alpha: 0.25)),
+                  ),
+                ),
+              ),
+            ),
+          if (anyMarked)
+            Semantics(
+              button: true,
+              label: 'Remove highlight',
+              child: GestureDetector(
+                onTap: () => _highlightSelection(null),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: ExodusTheme.ironMist),
+                  ),
+                  child: const Icon(Icons.format_color_reset_outlined,
+                      size: 16, color: ExodusTheme.ironMist),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1232,9 +1859,8 @@ class _BookPickerState extends State<_BookPicker> {
 
   Widget _bookTile(int i) {
     final isExpanded = _expanded == i;
-    final chapters = widget.bible.books.isEmpty
-        ? 0
-        : widget.bible.books[i].chapterCount;
+    final chapters =
+        widget.bible.books.isEmpty ? 0 : widget.bible.books[i].chapterCount;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

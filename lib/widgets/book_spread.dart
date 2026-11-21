@@ -41,6 +41,10 @@ class BookSpread extends StatefulWidget {
   /// True to skip the turning animation (Reduce Motion).
   final bool reduceMotion;
 
+  /// False while the page is being drawn on: a drag is then a pen stroke,
+  /// and must not turn the page under it.
+  final bool interactive;
+
   const BookSpread({
     super.key,
     required this.pageCount,
@@ -49,6 +53,7 @@ class BookSpread extends StatefulWidget {
     required this.blankBuilder,
     required this.onSpreadChanged,
     this.reduceMotion = false,
+    this.interactive = true,
   });
 
   static int spreadCountFor(int pages) => math.max(1, (pages + 1) ~/ 2);
@@ -161,8 +166,8 @@ class _BookSpreadState extends State<BookSpread>
       _width = constraints.maxWidth / 2;
       return GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragUpdate: _onDragUpdate,
-        onHorizontalDragEnd: _onDragEnd,
+        onHorizontalDragUpdate: widget.interactive ? _onDragUpdate : null,
+        onHorizontalDragEnd: widget.interactive ? _onDragEnd : null,
         child: AnimatedBuilder(
           animation: _pos,
           builder: (context, _) => _spreadAt(context, _pos.value),

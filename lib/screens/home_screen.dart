@@ -12,6 +12,10 @@ import '../theme/exodus_theme.dart';
 import '../widgets/arrival.dart';
 import '../widgets/community_strip.dart';
 import '../widgets/exodus_shield.dart';
+import '../services/action_plan_service.dart';
+import '../widgets/conversation_tile.dart';
+import '../widgets/plan_card.dart';
+import 'active_steps_screen.dart';
 import '../widgets/page_backdrop.dart';
 import '../widgets/scripture_background.dart';
 import '../widgets/scripture_link.dart';
@@ -34,12 +38,16 @@ class HomeScreen extends StatefulWidget {
   /// Show the whole conversation list (the drawer's chats section).
   final VoidCallback onSeeAll;
 
+  /// Delete a conversation, swiped away from the list. The shell offers Undo.
+  final ValueChanged<String>? onDeleteConversation;
+
   const HomeScreen({
     super.key,
     this.onOpenMenu,
     required this.onOpenConversation,
     required this.onNewConversation,
     required this.onSeeAll,
+    this.onDeleteConversation,
   });
 
   @override
@@ -122,6 +130,28 @@ class HomeScreenState extends State<HomeScreen> {
     ];
 
     final threads = <Widget>[
+      // A plan in progress comes before everything else they could do here:
+      // it is the one thing they already decided to do today.
+      ListenableBuilder(
+        listenable: ActionPlanService.instance,
+        builder: (context, _) {
+          final running = ActionPlanService.instance.active;
+          if (running.isEmpty) return const SizedBox.shrink();
+          final plan = running.first;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 22),
+            child: PlanCard(
+              plan: plan,
+              onOpen: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ActiveStepsScreen(
+                  planId: plan.id,
+                  onOpenConversation: widget.onOpenConversation,
+                ),
+              )),
+            ),
+          );
+        },
+      ),
       _searchField(),
       const SizedBox(height: 22),
       _conversationsHeader(conversations.length),
@@ -479,101 +509,17 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _conversationTile(Conversation conv) {
-    final preview = conv.messages.isEmpty
-        ? 'No messages yet'
-        : conv.messages.last.content.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => widget.onOpenConversation(conv.id),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: ExodusTheme.midnight.withValues(alpha: 0.72),
-            border: Border.all(color: ExodusTheme.steel),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: ExodusTheme.slate,
-                  border: Border.all(
-                      color: ExodusTheme.brass.withValues(alpha: 0.30)),
-                ),
-                child: const ExodusShield(size: 20, glow: false),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(conv.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: ExodusTheme.porcelain,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                              )),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(_when(conv.updatedAt),
-                            style: const TextStyle(
-                                color: ExodusTheme.ironMist, fontSize: 11)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(preview,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: ExodusTheme.ironMist,
-                            fontSize: 13,
-                            height: 1.4)),
-                  ],
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.only(left: 6, top: 12),
-                child: Icon(Icons.chevron_right_rounded,
-                    size: 20, color: ExodusTheme.ironMist),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final delete = widget.onDeleteConversation;
+    return ConversationTile(
+      key: ValueKey(conv.id),
+      conversation: conv,
+      onOpen: () => widget.onOpenConversation(conv.id),
+      onDelete: delete == null
+          ? null
+          : () {
+              delete(conv.id);
+              setState(() {});
+            },
     );
-  }
-
-  /// Clock time today, weekday this week, date beyond — the shape the design
-  /// shows ("12:51 PM", "Yesterday", "Mon").
-  static String _when(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final that = DateTime(dt.year, dt.month, dt.day);
-    final days = today.difference(that).inDays;
-
-    if (days == 0) {
-      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-      final m = dt.minute.toString().padLeft(2, '0');
-      return '$h:$m ${dt.hour < 12 ? 'AM' : 'PM'}';
-    }
-    if (days == 1) return 'Yesterday';
-    if (days < 7) {
-      const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      return names[dt.weekday - 1];
-    }
-    return '${dt.day}/${dt.month}';
   }
 }

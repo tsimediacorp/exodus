@@ -64,12 +64,22 @@ class _CommunityStripState extends State<CommunityStrip> {
         else
           SizedBox(
             height: 158,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              itemCount: posts.length > 6 ? 6 : posts.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => _card(posts[i]),
+            // The next card fades out at the edge of the page instead of
+            // being cut off by it. Where a screen ends early (the folded
+            // Duo's status column) a hard cut read as a rendering fault.
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (r) => LinearGradient(
+                colors: const [Colors.white, Colors.white, Colors.transparent],
+                stops: [0, 1 - 36 / r.width, 1],
+              ).createShader(r),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                clipBehavior: Clip.none,
+                itemCount: posts.length > 6 ? 6 : posts.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (_, i) => _card(posts[i]),
+              ),
             ),
           ),
       ],

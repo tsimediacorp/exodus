@@ -29,12 +29,16 @@ class NotificationService {
   /// thread rather than a tab.
   final ValueNotifier<String?> openConversationRequested = ValueNotifier(null);
 
+  /// Set to a plan id when an Active Steps reminder is tapped.
+  final ValueNotifier<String?> openPlanRequested = ValueNotifier(null);
+
   /// Payload prefixes. Every notification must carry one: without a payload
   /// there is no way to tell what was tapped, and this used to send EVERY tap
   /// to the Devotional tab — including, once check-ins started arriving, taps
   /// on a follow-up about something else entirely.
   static const String _devotionalPayload = 'devotional';
   static const String _checkInPayload = 'checkin:';
+  static const String _planPayload = 'plan:';
 
   /// A message the admin panel placed in a conversation. Beta scaffolding;
   /// it routes to Counsel on that thread.
@@ -47,6 +51,10 @@ class NotificationService {
     }
     if (payload.startsWith(_checkInPayload)) {
       openCheckInRequested.value = payload.substring(_checkInPayload.length);
+      return;
+    }
+    if (payload.startsWith(_planPayload)) {
+      openPlanRequested.value = payload.substring(_planPayload.length);
       return;
     }
     if (payload.startsWith(chatPayload)) {
@@ -330,5 +338,61 @@ class NotificationService {
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
+  }
+
+  /// Notification ids for Active Steps reminders: one per plan day, in a
+  /// block of their own so they never collide with the devotional's.
+  static const int _stepBase = 96000;
+  static const int _maxStepDays = 31;
+
+  /// Morning reminders for the plan's coming steps.
+  ///
+  /// Only the next week is scheduled: iOS holds 64 pending notifications in
+  /// all, and a month-long plan would take half of them. The service
+  /// reschedules on every launch and every step checked off, so the window
+  /// keeps moving forward.
+  Future<void> scheduleStepReminders({
+    required String planId,
+    required String planTitle,
+    required List<({int day, String title, DateTime date})> upcoming,
+    int hour = 8,
+  }) async {
+    if (!_ready) return;
+    await cancelStepReminders();
+    final now = tz.TZDateTime.now(tz.local);
+    for (final step in upcoming.take(7)) {
+      final when = tz.TZDateTime.from(
+        DateTime(step.date.year, step.date.month, step.date.day, hour),
+        tz.local,
+      );
+      if (when.isBefore(now)) continue;
+      await _plugin.zonedSchedule(
+        _stepBase + step.day,
+        '$planTitle · Day ${step.day}',
+        step.title,
+        when,
+        const NotificationDetails(
+          iOS: DarwinNotificationDetails(),
+          android: AndroidNotificationDetails(
+            'active_steps',
+            'Active Steps',
+            channelDescription: 'Your daily step from an EXODUS plan',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        payload: '$_planPayload$planId',
+      );
+    }
+  }
+
+  Future<void> cancelStepReminders() async {
+    if (!_ready) return;
+    for (var d = 1; d <= _maxStepDays; d++) {
+      await _plugin.cancel(_stepBase + d);
+    }
   }
 }

@@ -17,6 +17,10 @@ class ChatMessage {
   /// null until the stream finishes (or for user messages).
   int? responseTimeMs;
 
+  /// An Active Steps plan this message presents. The thread shows the
+  /// plan's live card under it.
+  String? planId;
+
   ChatMessage({
     required this.content,
     required this.sender,
@@ -24,6 +28,7 @@ class ChatMessage {
     this.isLoading = false,
     this.isStreaming = false,
     this.responseTimeMs,
+    this.planId,
     List<String>? images,
   })  : images = images ?? [],
         timestamp = timestamp ?? DateTime.now();
@@ -55,6 +60,7 @@ class ChatMessage {
         'timestamp': timestamp.toIso8601String(),
         if (responseTimeMs != null) 'responseTimeMs': responseTimeMs,
         if (images.isNotEmpty) 'images': images,
+        if (planId != null) 'planId': planId,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -62,6 +68,7 @@ class ChatMessage {
         content: json['content'] as String,
         timestamp: DateTime.parse(json['timestamp'] as String),
         responseTimeMs: json['responseTimeMs'] as int?,
+        planId: json['planId'] as String?,
         images: (json['images'] as List<dynamic>?)
             ?.map((e) => e as String)
             .toList(),

@@ -57,6 +57,8 @@ class StorageService {
   static const _kSavedVerses       = 'exodus.verses.saved';
   static const _kLetters           = 'exodus.letters';
   static const _kCheckIns          = 'exodus.checkIns';
+  static const _kActionPlans       = 'exodus.actionPlans';
+  static const _kBibleMarks        = 'exodus.bible.marks';
   static const _kCheckInScan       = 'exodus.checkIns.lastScan';
   static const _kCheckInsEnabled   = 'exodus.checkIns.enabled';
   static const _kStudyExercises    = 'exodus.study.exercises';
@@ -328,6 +330,16 @@ class StorageService {
   }
 
   // ---------------- Check-ins ----------------
+
+  /// Raw JSON for Active Steps plans; the service owns the shape.
+  String? loadActionPlansRaw() => _prefs?.getString(_kActionPlans);
+  Future<void> saveActionPlansRaw(String json) async =>
+      _prefs?.setString(_kActionPlans, json);
+
+  /// Raw JSON for Bible highlights, notes and ink; the store owns the shape.
+  String? loadBibleMarksRaw() => _prefs?.getString(_kBibleMarks);
+  Future<void> saveBibleMarksRaw(String json) async =>
+      _prefs?.setString(_kBibleMarks, json);
 
   List<CheckIn> loadCheckIns() {
     final raw = _prefs?.getString(_kCheckIns);
