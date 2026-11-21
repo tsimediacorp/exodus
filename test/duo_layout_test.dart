@@ -176,9 +176,11 @@ void main() {
     testWidgets('rests on two facing pages', (tester) async {
       setScreen(tester, inner);
       await tester.pumpWidget(book(pages: 5, spread: 0, onChanged: (_) {}));
-      expect(find.text('page 0'), findsOneWidget);
-      expect(find.text('page 1'), findsOneWidget);
-      expect(find.text('page 2'), findsNothing);
+      // The neighbours a turn would need lie painted underneath; only the
+      // two facing pages can be touched.
+      expect(find.text('page 0').hitTestable(), findsOneWidget);
+      expect(find.text('page 1').hitTestable(), findsOneWidget);
+      expect(find.text('page 2').hitTestable(), findsNothing);
       expect(tester.getCenter(find.text('page 0')).dx < inner.width / 2,
           isTrue);
     });
@@ -207,8 +209,8 @@ void main() {
       setScreen(tester, inner);
       await tester.pumpWidget(book(pages: 5, spread: 2, onChanged: (_) {}));
       await tester.pumpAndSettle();
-      expect(find.text('page 4'), findsOneWidget);
-      expect(find.text('end'), findsOneWidget);
+      expect(find.text('page 4').hitTestable(), findsOneWidget);
+      expect(find.text('end').hitTestable(), findsOneWidget);
     });
 
     testWidgets('cannot turn past the last page', (tester) async {

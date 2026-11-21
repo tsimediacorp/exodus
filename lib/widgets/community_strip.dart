@@ -67,19 +67,9 @@ class _CommunityStripState extends State<CommunityStrip> {
             // The next card fades out at the edge of the page instead of
             // being cut off by it. Where a screen ends early (the folded
             // Duo's status column) a hard cut read as a rendering fault.
-            child: ShaderMask(
-              blendMode: BlendMode.dstIn,
-              shaderCallback: (r) => LinearGradient(
-                colors: const [Colors.white, Colors.white, Colors.transparent],
-                stops: [0, 1 - 36 / r.width, 1],
-              ).createShader(r),
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                itemCount: posts.length > 6 ? 6 : posts.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, i) => _card(posts[i]),
-              ),
+            child: _FadedStrip(
+              count: posts.length > 6 ? 6 : posts.length,
+              itemBuilder: (i) => _card(posts[i]),
             ),
           ),
       ],
@@ -88,37 +78,44 @@ class _CommunityStripState extends State<CommunityStrip> {
 
   Widget _header() {
     final unread = _service.unreadCount;
+    // The title and its badge take all the free width. A Flexible title
+    // beside a Spacer only ever got half of it, which on the folded Duo
+    // broke "You are not the only one" over three lines.
     return Row(
       children: [
-        const Flexible(
-          child: Text(
-            CommunityPrompt.sectionTitle,
-            style: TextStyle(
-              fontFamily: ExodusTheme.serif,
-              color: ExodusTheme.parchment,
-              fontSize: 19,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -0.2,
+        Expanded(
+          child: Row(children: [
+            const Flexible(
+              child: Text(
+                CommunityPrompt.sectionTitle,
+                style: TextStyle(
+                  fontFamily: ExodusTheme.serif,
+                  color: ExodusTheme.parchment,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
+                ),
+              ),
             ),
-          ),
+            if (unread > 0) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: ExodusTheme.brass.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text('$unread new',
+                    style: const TextStyle(
+                      color: ExodusTheme.brass,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    )),
+              ),
+            ],
+          ]),
         ),
-        if (unread > 0) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: ExodusTheme.brass.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Text('$unread new',
-                style: const TextStyle(
-                  color: ExodusTheme.brass,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                )),
-          ),
-        ],
-        const Spacer(),
+        const SizedBox(width: 8),
         InkWell(
           borderRadius: BorderRadius.circular(6),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -244,6 +241,73 @@ class _CommunityStripState extends State<CommunityStrip> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The horizontal run of cards, faded at whichever ends have more to show.
+///
+/// The list clips to its own bounds and the fade sits inside them, so a
+/// card is never cut by a hard edge: not by the page margin as it scrolls
+/// away on the left, and not by the folded Duo's status column on the
+/// right. (It used to overflow its bounds unclipped, which let a card run
+/// on past the fade and stop dead at the column.)
+class _FadedStrip extends StatefulWidget {
+  final int count;
+  final Widget Function(int index) itemBuilder;
+
+  const _FadedStrip({required this.count, required this.itemBuilder});
+
+  @override
+  State<_FadedStrip> createState() => _FadedStripState();
+}
+
+class _FadedStripState extends State<_FadedStrip> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _scroll,
+      builder: (context, child) {
+        final offset = _scroll.hasClients ? _scroll.offset : 0.0;
+        final rest = _scroll.hasClients
+            ? _scroll.position.maxScrollExtent - offset
+            : double.infinity;
+        // Each fade grows in as there is something beyond that edge.
+        final lead = offset.clamp(0.0, 24.0);
+        final trail = rest.isFinite ? rest.clamp(0.0, 56.0) : 56.0;
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (r) {
+            final a = r.width <= 0 ? 0.0 : lead / r.width;
+            final b = r.width <= 0 ? 1.0 : 1 - trail / r.width;
+            return LinearGradient(
+              colors: const [
+                Colors.transparent,
+                Colors.white,
+                Colors.white,
+                Colors.transparent,
+              ],
+              stops: [0, a.clamp(0.0, 0.5), b.clamp(0.5, 1.0), 1],
+            ).createShader(r);
+          },
+          child: child,
+        );
+      },
+      child: ListView.separated(
+        controller: _scroll,
+        scrollDirection: Axis.horizontal,
+        itemCount: widget.count,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (_, i) => widget.itemBuilder(i),
       ),
     );
   }

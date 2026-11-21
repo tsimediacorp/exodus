@@ -193,6 +193,11 @@ class ExodusSideRail extends StatelessWidget {
 
   static const double _rowHeight = 64;
 
+  /// How far down the column iOS's own status items (time, signal ring)
+  /// reach on the folded Duo. Measured from a device screenshot: the ring
+  /// ends about 147pt down.
+  static const double statusHeight = 156;
+
   /// Row of the slot showing each tab. New Chat holds row 2 and is never
   /// selected, exactly as on the bottom bar.
   static const _rowOfTab = {
@@ -209,7 +214,8 @@ class ExodusSideRail extends StatelessWidget {
     _TabData tab(int index, IconData on, IconData off, String label) =>
         _TabData(index, selected == index ? on : off, label);
     final tabs = [
-      tab(ExodusBottomNav.home, Icons.home_rounded, Icons.home_outlined, 'Home'),
+      tab(ExodusBottomNav.home, Icons.home_rounded, Icons.home_outlined,
+          'Home'),
       tab(ExodusBottomNav.explore, Icons.explore_rounded,
           Icons.explore_outlined, 'Explore'),
       tab(ExodusBottomNav.library, Icons.menu_book_rounded,
@@ -230,9 +236,11 @@ class ExodusSideRail extends StatelessWidget {
       child: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.15,
         child: Padding(
-          padding: EdgeInsets.only(bottom: pad.bottom + 6),
+          // Top-justified, starting just under the clock and signal that
+          // iOS draws at the head of the column.
+          padding: EdgeInsets.only(top: pad.top + statusHeight),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               // A whisper of a rule where the status items end and the
               // navigation begins, so the column reads as designed rather
