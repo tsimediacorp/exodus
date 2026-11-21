@@ -129,7 +129,8 @@ class HomeScreenState extends State<HomeScreen> {
       _verseCard(),
     ];
 
-    final threads = <Widget>[
+    // Built inside the layout, once it is known whether this is a column.
+    List<Widget> threads() => <Widget>[
       // A plan in progress comes before everything else they could do here:
       // it is the one thing they already decided to do today.
       ListenableBuilder(
@@ -180,9 +181,8 @@ class HomeScreenState extends State<HomeScreen> {
           // beside the rail on the upright inner screen that is ~577pt, and
           // two columns there would each be narrower than the folded phone.
           child: LayoutBuilder(builder: (context, constraints) {
-            if (constraints.maxWidth >= _twoColumnMinWidth) {
-              return _twoColumns(welcome, threads);
-            }
+            _twoColumn = constraints.maxWidth >= _twoColumnMinWidth;
+            if (_twoColumn) return _twoColumns(welcome, threads());
             // One column, with the margins the larger screen can afford.
             final side = expanded ? 32.0 : 20.0;
             return ListView(
@@ -190,7 +190,7 @@ class HomeScreenState extends State<HomeScreen> {
               children: [
                 ...welcome,
                 const SizedBox(height: 18),
-                ...threads,
+                ...threads(),
               ],
             );
           }),
@@ -200,6 +200,9 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   static const double _twoColumnMinWidth = 640;
+
+  /// Set during layout, just before the tiles are built.
+  bool _twoColumn = false;
 
   /// Unfolded: what is said to you on the left, what you have said on the
   /// right. Each column scrolls on its own, and the gap between them sits
@@ -513,6 +516,9 @@ class HomeScreenState extends State<HomeScreen> {
     return ConversationTile(
       key: ValueKey(conv.id),
       conversation: conv,
+      // In the narrower conversations column the avatar cost the title half
+      // its width; dense drops it and lets the title wrap to two lines.
+      dense: _twoColumn,
       onOpen: () => widget.onOpenConversation(conv.id),
       onDelete: delete == null
           ? null

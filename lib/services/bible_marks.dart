@@ -20,11 +20,21 @@ class MarkColors {
 
   static const names = ['Brass', 'Rose', 'Sage', 'Sky', 'Lavender'];
 
+  /// Highlighter inks: translucent, laid under the words with a multiply
+  /// blend, so on paper they look like marker rather than paint.
+  static const markers = <Color>[
+    Color(0xFFF2D45C), // yellow
+    Color(0xFFF29BB0), // pink
+    Color(0xFF9FD89A), // green
+    Color(0xFF8EC5F0), // blue
+  ];
+
+  /// Pen inks for paper: the colours of real pens in a study Bible.
   static const ink = <Color>[
-    Color(0xFFE5C880), // brass glow
-    Color(0xFFE6ECF5), // porcelain
-    Color(0xFFE59AA6), // rose
-    Color(0xFF8FB8F0), // sky
+    Color(0xFF9B2C22), // rubric red
+    Color(0xFF1F3A6E), // blue-black
+    Color(0xFF3A342E), // graphite
+    Color(0xFF2E6B4F), // green
   ];
 }
 
@@ -42,12 +52,16 @@ class InkStroke {
   final double width;
   final List<Offset> points;
 
+  /// A highlighter stroke: drawn wide and translucent, under the text.
+  final bool marker;
+
   InkStroke({
     required this.id,
     required this.verse,
     required this.color,
     required this.points,
     this.width = 2.4,
+    this.marker = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +69,7 @@ class InkStroke {
         'v': verse,
         'c': color,
         'w': width,
+        if (marker) 'm': 1,
         // Three decimals of a verse box is well under a pixel.
         'p': [
           for (final p in points) ...[
@@ -71,6 +86,7 @@ class InkStroke {
       verse: (j['v'] as num).toInt(),
       color: (j['c'] as num).toInt(),
       width: (j['w'] as num?)?.toDouble() ?? 2.4,
+      marker: j['m'] == 1,
       points: [
         for (var i = 0; i + 1 < flat.length; i += 2)
           Offset(flat[i].toDouble(), flat[i + 1].toDouble()),

@@ -17,24 +17,27 @@ class TtsService {
   final ValueNotifier<String?> speakingKey = ValueNotifier<String?>(null);
 
   bool _initialized = false;
+  int _turn = 0;
 
   Future<void> _init() async {
     if (_initialized) return;
     _initialized = true;
-    // iOS: without a shared session set to `playback`, the synthesiser obeys
-    // the ring/silent switch — so a muted phone reads replies silently, which
-    // looks like the Play button doing nothing. No effect on Android.
+    // iOS audio session. Two rules, both learned the hard way:
+    //  * Set the category, never activate it here. Activating a session
+    //    whose category is still iOS's default (solo ambient) pauses
+    //    whatever the person was listening to, and this runs on launch.
+    //  * `defaultToSpeaker` is only legal with playAndRecord. Passed with
+    //    `playback` the whole call fails, the category never changes, and
+    //    the voice obeys the silent switch.
+    // `playback` reads aloud on a muted phone; `duckOthers` lowers their
+    // music while EXODUS speaks instead of stopping it.
     try {
-      await _tts.setSharedInstance(true);
       await _tts.setIosAudioCategory(
         IosTextToSpeechAudioCategory.playback,
-        [
-          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
-          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
-        ],
+        [IosTextToSpeechAudioCategoryOptions.duckOthers],
       );
     } catch (_) {
-      // Not iOS, or an older platform — the default session still speaks.
+      // Not iOS, or an older platform; the default session still speaks.
     }
 
     await _tts.setLanguage('en-GB');
@@ -100,13 +103,37 @@ class TtsService {
       return;
     }
     await _tts.stop();
+    _turn++;
     speakingKey.value = key;
-    await _tts.speak(_stripMarkdown(text));
+    await _speak(_stripMarkdown(text));
+  }
+
+  /// Speak [text] under [key] and complete when it has been read, or was
+  /// cancelled. Returns false if something else took over the voice.
+  Future<bool> speakAndWait(String key, String text) async {
+    await _init();
+    final turn = ++_turn;
+    speakingKey.value = key;
+    await _speak(text);
+    // The completion handler may already have cleared the key; what matters
+    // is whether anyone stopped or replaced us while we spoke.
+    return turn == _turn;
+  }
+
+  Future<void> _speak(String text) async {
+    // Only now, with something to say, take the audio session.
+    try {
+      await _tts.setSharedInstance(true);
+    } catch (_) {}
+    await _tts.speak(text);
   }
 
   Future<void> stop() async {
-    await _tts.stop();
+    // Nothing playing: leave the audio session (and their music) alone.
+    if (!_initialized || speakingKey.value == null) return;
+    _turn++;
     speakingKey.value = null;
+    await _tts.stop();
   }
 
   /// Remove markdown syntax so the TTS engine doesn't read "asterisk" etc.
