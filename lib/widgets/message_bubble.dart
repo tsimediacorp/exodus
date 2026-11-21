@@ -11,6 +11,7 @@ import '../services/conversation_search.dart';
 import '../services/progress.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
+import '../services/action_plan_service.dart';
 import '../services/follow_ups.dart';
 import '../services/key_scripture.dart';
 import 'arrival.dart';
@@ -184,7 +185,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _copy() {
-    Clipboard.setData(ClipboardData(text: widget.message.content));
+    Clipboard.setData(ClipboardData(text: _visibleText));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text('Copied'),
       duration: Duration(seconds: 1),
@@ -280,7 +281,8 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// which may still carry the follow-up marker.
   String get _visibleText => _isUser
       ? widget.message.content
-      : KeyScripture.strip(FollowUps.strip(widget.message.content));
+      : ActionPlanService.strip(
+          KeyScripture.strip(FollowUps.strip(widget.message.content)));
 
   /// The passage EXODUS marked as the anchor of this reply, if any.
   ///
@@ -580,7 +582,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                 label: speaking ? 'Stop reading' : 'Read aloud',
                 highlight: speaking,
                 onTap: () => TtsService.instance
-                    .toggle(_ttsKey, widget.message.content),
+                    .toggle(_ttsKey, _visibleText),
               );
             },
           ),
@@ -606,7 +608,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         ttsKey: _ttsKey,
         onCopy: _copy,
         onPlay: () =>
-            TtsService.instance.toggle(_ttsKey, widget.message.content),
+            TtsService.instance.toggle(_ttsKey, _visibleText),
         onRegenerate: widget.onRegenerate,
         onEdit: widget.onEdit,
         onDelete: widget.onDelete,
@@ -615,7 +617,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             : () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => ReaderScreen(
-                      text: widget.message.content,
+                      text: _visibleText,
                       markdown: !_isUser,
                     ),
                   ),

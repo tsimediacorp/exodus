@@ -89,16 +89,10 @@ class ExodusNavRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduce = ExodusLayout.reduceMotion(context);
-    return Container(
+    // Transparent: the rail sits on the same wash of light as the panes
+    // beside it, so it reads as the edge of one surface, not a separate bar.
+    return SizedBox(
       width: width,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [ExodusTheme.midnight, ExodusTheme.obsidian],
-        ),
-        border: Border(right: BorderSide(color: ExodusTheme.steel)),
-      ),
       child: SafeArea(
         right: false,
         child: MediaQuery.withClampedTextScaling(
@@ -170,6 +164,114 @@ class ExodusNavRail extends StatelessWidget {
   }
 }
 
+/// The folded Duo's navigation, in the status column down the right edge.
+///
+/// That column is reserved for the clock and signal at the top and empty
+/// for the rest of its height, so everything the bottom bar holds moves
+/// into it, stacked from the bottom where the thumb already is. Content
+/// gets the whole height of the screen back, and the column stops being a
+/// dead strip that every screen's edge runs into.
+///
+/// Same five slots in the same order as [ExodusBottomNav], read top to
+/// bottom instead of left to right, and the same sliding lamp as the
+/// unfolded rail, so all three navigations feel like one thing.
+class ExodusSideRail extends StatelessWidget {
+  final int? selected;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onNewChat;
+
+  /// The column's width, from the safe-area inset.
+  final double width;
+
+  const ExodusSideRail({
+    super.key,
+    required this.selected,
+    required this.onSelect,
+    required this.onNewChat,
+    required this.width,
+  });
+
+  static const double _rowHeight = 64;
+
+  /// Row of the slot showing each tab. New Chat holds row 2 and is never
+  /// selected, exactly as on the bottom bar.
+  static const _rowOfTab = {
+    ExodusBottomNav.home: 0,
+    ExodusBottomNav.explore: 1,
+    ExodusBottomNav.library: 3,
+    ExodusBottomNav.profile: 4,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final reduce = ExodusLayout.reduceMotion(context);
+    final pad = MediaQuery.viewPaddingOf(context);
+    _TabData tab(int index, IconData on, IconData off, String label) =>
+        _TabData(index, selected == index ? on : off, label);
+    final tabs = [
+      tab(ExodusBottomNav.home, Icons.home_rounded, Icons.home_outlined, 'Home'),
+      tab(ExodusBottomNav.explore, Icons.explore_rounded,
+          Icons.explore_outlined, 'Explore'),
+      tab(ExodusBottomNav.library, Icons.menu_book_rounded,
+          Icons.menu_book_outlined, 'Library'),
+      tab(ExodusBottomNav.profile, Icons.person_rounded,
+          Icons.person_outline_rounded, 'Profile'),
+    ];
+    Widget item(_TabData t) => _RailItem(
+          icon: t.icon,
+          label: t.label,
+          selected: selected == t.index,
+          height: _rowHeight,
+          onTap: () => onSelect(t.index),
+        );
+
+    return SizedBox(
+      width: width,
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.15,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: pad.bottom + 6),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              // A whisper of a rule where the status items end and the
+              // navigation begins, so the column reads as designed rather
+              // than as leftover space.
+              const _Rule(),
+              const SizedBox(height: 10),
+              _Group(
+                selected: selected == null ? null : _rowOfTab[selected],
+                reduceMotion: reduce,
+                rowHeight: _rowHeight,
+                inset: 8,
+                children: [
+                  item(tabs[0]),
+                  item(tabs[1]),
+                  SizedBox(
+                    height: _rowHeight,
+                    child: Center(
+                      child: _NewChatButton(onTap: onNewChat, compact: true),
+                    ),
+                  ),
+                  item(tabs[2]),
+                  item(tabs[3]),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabData {
+  final int index;
+  final IconData icon;
+  final String label;
+  const _TabData(this.index, this.icon, this.label);
+}
+
 /// A run of rail rows sharing one sliding lamp.
 class _Group extends StatelessWidget {
   final int? selected;
@@ -177,11 +279,15 @@ class _Group extends StatelessWidget {
   final double rowHeight;
   final List<Widget> children;
 
+  /// Space either side of the lamp.
+  final double inset;
+
   const _Group({
     required this.selected,
     required this.reduceMotion,
     required this.rowHeight,
     required this.children,
+    this.inset = 12,
   });
 
   @override
@@ -196,8 +302,8 @@ class _Group extends StatelessWidget {
               reduceMotion ? Duration.zero : const Duration(milliseconds: 460),
           curve: Curves.easeOutBack,
           top: (sel ?? 0) * rowHeight + 6,
-          left: 12,
-          right: 12,
+          left: inset,
+          right: inset,
           height: rowHeight - 12,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 220),
@@ -341,7 +447,11 @@ class _Rule extends StatelessWidget {
 /// than a place.
 class _NewChatButton extends StatefulWidget {
   final VoidCallback onTap;
-  const _NewChatButton({required this.onTap});
+
+  /// Ring only, no caption: for the side column, where a caption would
+  /// push the ring out of its row.
+  final bool compact;
+  const _NewChatButton({required this.onTap, this.compact = false});
 
   @override
   State<_NewChatButton> createState() => _NewChatButtonState();
@@ -383,9 +493,10 @@ class _NewChatButtonState extends State<_NewChatButton>
             animation: _breath,
             builder: (context, child) {
               final t = Curves.easeInOut.transform(_breath.value);
+              final d = widget.compact ? 44.0 : 50.0;
               return Container(
-                width: 50,
-                height: 50,
+                width: d,
+                height: d,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: ExodusTheme.obsidian,
@@ -412,9 +523,11 @@ class _NewChatButtonState extends State<_NewChatButton>
                   size: 26, color: ExodusTheme.brass),
             ),
           ),
-          const SizedBox(height: 5),
-          const Text('New Chat',
-              style: TextStyle(color: ExodusTheme.ironMist, fontSize: 10.5)),
+          if (!widget.compact) ...[
+            const SizedBox(height: 5),
+            const Text('New Chat',
+                style: TextStyle(color: ExodusTheme.ironMist, fontSize: 10.5)),
+          ],
         ],
       ),
     );

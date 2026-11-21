@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../layout/exodus_layout.dart';
+import '../services/action_plan_service.dart';
 import '../services/notification_service.dart';
 import '../services/storage_service.dart';
 import '../services/analytics.dart';
@@ -7,7 +8,9 @@ import '../theme/exodus_theme.dart';
 import '../widgets/exodus_bottom_nav.dart';
 import '../widgets/exodus_nav_rail.dart';
 import '../widgets/notification_primer.dart';
+import '../widgets/page_backdrop.dart';
 import '../widgets/unfold_reveal.dart';
+import 'active_steps_screen.dart';
 import 'chat_screen.dart';
 import 'conversations_screen.dart';
 import 'coaching_screen.dart';
@@ -72,6 +75,9 @@ class _HomeShellState extends State<HomeShell> {
         .addListener(_onOpenDevotional);
     NotificationService.instance.openCheckInRequested
         .addListener(_onOpenCheckIn);
+    NotificationService.instance.openPlanRequested.addListener(_onOpenPlan);
+    // The reminder window moves forward one day at a time; keep it current.
+    ActionPlanService.instance.refreshReminders();
     NotificationService.instance.openConversationRequested
         .addListener(_onOpenConversationFromPush);
     // Ask once the app is actually on screen, with a reason, rather than
@@ -88,6 +94,8 @@ class _HomeShellState extends State<HomeShell> {
         .removeListener(_onOpenDevotional);
     NotificationService.instance.openCheckInRequested
         .removeListener(_onOpenCheckIn);
+    NotificationService.instance.openPlanRequested
+        .removeListener(_onOpenPlan);
     NotificationService.instance.openConversationRequested
         .removeListener(_onOpenConversationFromPush);
     super.dispose();
@@ -115,6 +123,20 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
+  /// An Active Steps reminder was tapped: open that plan.
+  void _onOpenPlan() {
+    final id = NotificationService.instance.openPlanRequested.value;
+    if (id == null || !mounted) return;
+    NotificationService.instance.openPlanRequested.value = null;
+    if (ActionPlanService.instance.byId(id) == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ActiveStepsScreen(
+        planId: id,
+        onOpenConversation: _openConversation,
+      ),
+    ));
+  }
+
   /// A message the admin panel placed in a thread, tapped from its push.
   ///
   /// Beta scaffolding. DebugSync has already fetched the message by the time
@@ -137,13 +159,43 @@ class _HomeShellState extends State<HomeShell> {
       builder: (_) => ConversationsScreen(
         onOpen: _openConversation,
         onNew: _newConversation,
-        onDelete: (id) {
-          _chatKey.currentState?.deleteConversationById(id);
-          setState(() {});
-        },
+        onDelete: _deleteConversation,
       ),
     ));
   }
+
+  /// Delete at once and offer Undo, rather than asking first. The thread is
+  /// held in memory until the offer lapses, so Undo puts back exactly what
+  /// was there, in the same place in the list.
+  void _deleteConversation(String id) {
+    final chat = _chatKey.currentState;
+    if (chat == null) return;
+    final removed = chat.deleteConversationById(id);
+    _homeKey.currentState?.refresh();
+    setState(() {});
+    if (removed == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('Deleted “${_short(removed.conversation.title)}”'),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Undo',
+          textColor: ExodusTheme.brass,
+          onPressed: () {
+            _chatKey.currentState
+                ?.restoreConversation(removed.conversation, removed.index);
+            _homeKey.currentState?.refresh();
+            if (mounted) setState(() {});
+          },
+        ),
+      ));
+  }
+
+  static String _short(String title) =>
+      title.length <= 32 ? title : '${title.substring(0, 30).trimRight()}…';
 
   void _goToMode(int mode) {
     // One call site rather than one per screen: modes are opened from several
@@ -194,6 +246,7 @@ class _HomeShellState extends State<HomeShell> {
           onOpenConversation: _openConversation,
           onNewConversation: _newConversation,
           onSeeAll: _openConversationsList,
+          onDeleteConversation: _deleteConversation,
         ),
         ExploreScreen(onOpenMode: _goToMode),
         const LibraryScreen(),
@@ -211,8 +264,13 @@ class _HomeShellState extends State<HomeShell> {
       ],
     );
 
+    final side = ExodusLayout.sideColumnWidth(context);
     return UnfoldReveal(
-      child: expanded ? _expandedFrame(stack) : _compactFrame(stack),
+      child: expanded
+          ? _expandedFrame(stack)
+          : side > 0
+              ? _sideColumnFrame(stack, side)
+              : _compactFrame(stack),
     );
   }
 
@@ -231,6 +289,34 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
+  /// Folded Duo: navigation in the status column down the right edge.
+  ///
+  /// The screens underneath still see the column as a right inset, so their
+  /// text stays clear of it, but their backgrounds run under it to the
+  /// screen's edge. The rail is transparent and sits on that background,
+  /// so there is no strip, no seam, and no bar across the bottom.
+  Widget _sideColumnFrame(Widget stack, double width) {
+    return Scaffold(
+      key: _scaffoldKey,
+      body: Stack(
+        children: [
+          Positioned.fill(child: stack),
+          Positioned(
+            top: 0,
+            right: 0,
+            bottom: 0,
+            child: ExodusSideRail(
+              width: width,
+              selected: _selectedTab,
+              onSelect: _goToTab,
+              onNewChat: _newConversation,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Unfolded: the rail down the leading edge. With the room for it (the
   /// inner screen held sideways), Counsel also gains its conversation list
   /// beside the thread — list and message together, the way Mail opens up.
@@ -239,14 +325,19 @@ class _HomeShellState extends State<HomeShell> {
         ExodusLayout.hasRoomForTwoPanes(context);
     return Scaffold(
       key: _scaffoldKey,
-      body: Row(
+      // One wash of light across rail, list and thread. Each pane paints its
+      // own slice of it, so the panes meet without a seam.
+      body: BackdropFrame(
+        child: Row(
         children: [
-          ExodusNavRail(
-            selectedTab: _selectedTab,
-            selectedMode: _selectedMode,
-            onSelectTab: _goToTab,
-            onSelectMode: _goToMode,
-            onNewChat: _newConversation,
+          _SoftEdge(
+            child: ExodusNavRail(
+              selectedTab: _selectedTab,
+              selectedMode: _selectedMode,
+              onSelectTab: _goToTab,
+              onSelectMode: _goToMode,
+              onNewChat: _newConversation,
+            ),
           ),
           // The list slides in from under the rail rather than appearing, so
           // arriving in Counsel reads as the room opening up.
@@ -259,12 +350,8 @@ class _HomeShellState extends State<HomeShell> {
                   : const Duration(milliseconds: 420),
               curve: Curves.easeOutCubic,
               child: SizedBox(
-                width: _listPaneWidth,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    border: Border(
-                        right: BorderSide(color: ExodusTheme.steel)),
-                  ),
+                width: _listPaneWidth(context),
+                child: _SoftEdge(
                   child: ValueListenableBuilder<int>(
                     valueListenable: StorageService.instance.conversationsRevision,
                     builder: (context, _, __) => ConversationsScreen(
@@ -272,10 +359,7 @@ class _HomeShellState extends State<HomeShell> {
                       selectedId: _chatKey.currentState?.currentId,
                       onOpen: _openConversation,
                       onNew: _newConversation,
-                      onDelete: (id) {
-                        _chatKey.currentState?.deleteConversationById(id);
-                        setState(() {});
-                      },
+                      onDelete: _deleteConversation,
                     ),
                   ),
                 ),
@@ -284,11 +368,56 @@ class _HomeShellState extends State<HomeShell> {
           ),
           Expanded(child: stack),
         ],
+        ),
       ),
     );
   }
 
-  /// Wide enough for a title and two lines of preview; narrow enough that
-  /// the thread beside it keeps a comfortable reading measure on the Duo.
-  static const double _listPaneWidth = 268;
+  /// A third of the room beside the rail, within limits: wide enough that a
+  /// title and two lines of preview read without being cut off, narrow
+  /// enough that the thread keeps a comfortable measure.
+  static double _listPaneWidth(BuildContext context) {
+    final room = MediaQuery.sizeOf(context).width - ExodusNavRail.width;
+    return (room * 0.36).clamp(280.0, 360.0);
+  }
+}
+
+/// A pane's trailing edge as a fall of light rather than a ruled line: a
+/// hairline that fades out toward the top and bottom of the screen.
+class _SoftEdge extends StatelessWidget {
+  final Widget child;
+  const _SoftEdge({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        child,
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 1,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    ExodusTheme.steel.withValues(alpha: 0),
+                    ExodusTheme.steel,
+                    ExodusTheme.brass.withValues(alpha: 0.22),
+                    ExodusTheme.steel,
+                    ExodusTheme.steel.withValues(alpha: 0),
+                  ],
+                  stops: const [0, 0.2, 0.5, 0.8, 1],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

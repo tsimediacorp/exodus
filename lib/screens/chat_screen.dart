@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
+import '../models/action_plan.dart';
 import '../models/check_in.dart';
 import '../models/conversation.dart';
+import '../config/action_plan_prompt.dart';
+import '../services/action_plan_service.dart';
 import '../services/ai_service.dart';
 import '../services/analytics.dart';
 import '../services/check_in_service.dart';
@@ -23,6 +26,8 @@ import '../widgets/day_divider.dart';
 import '../widgets/dictation_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/page_backdrop.dart';
+import '../widgets/plan_card.dart';
+import 'active_steps_screen.dart';
 import '../widgets/progress_view.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -63,6 +68,9 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Conversation> _conversations = [];
   Conversation? _current;
   bool _sending = false;
+
+  /// True while an Active Steps plan is being written.
+  bool _writingPlan = false;
   StreamSubscription<String>? _activeStream;
 
   /// Completed when the active stream ends. Held here (not just as a local in
@@ -638,7 +646,14 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // Counsel only. The devotional, study and letter generators
               // build on the same master prompt and each want a specific
               // shape of output.
-              systemExtra: PresencePrompt.layer())
+              systemExtra: PresencePrompt.layer() +
+                  (conv.followUp ?? '') +
+                  ActionPlanPrompt.offerLayer(
+                      alreadyOffered: conv.planOffered ||
+                          ActionPlanService.instance
+                                  .forConversation(conv.id) !=
+                              null) +
+                  ActionPlanService.instance.counselLayer(DateTime.now()))
           .listen(
         (chunk) {
           setState(() {
@@ -714,6 +729,7 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _activeStream = null;
       _activeCompleter = null;
       conv.updatedAt = DateTime.now();
+      if (ActionPlanService.offers(replyMsg.content)) conv.planOffered = true;
       if (conv.title == 'New conversation') {
         conv.deriveTitleFromFirstUserMessage();
       }
@@ -763,13 +779,31 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
   }
 
-  Future<void> deleteConversationById(String id) async {
+  /// Remove a conversation, returning it and where it was so it can be put
+  /// back. Storage is written before this returns (the write itself
+  /// completes later), so a list rebuilt straight after no longer shows it.
+  ({Conversation conversation, int index})? deleteConversationById(String id) {
+    final index = _conversations.indexWhere((c) => c.id == id);
+    if (index < 0) return null;
+    final removed = _conversations[index];
     final wasCurrent = _current?.id == id;
+    if (wasCurrent && _sending) _stopGenerating();
     setState(() {
-      _conversations = _conversations.where((c) => c.id != id).toList();
+      _conversations = [..._conversations]..removeAt(index);
       if (wasCurrent) _current = null;
     });
-    await _persist();
+    unawaited(_persist());
+    return (conversation: removed, index: index);
+  }
+
+  /// Undo a delete.
+  void restoreConversation(Conversation conv, int index) {
+    if (_conversations.any((c) => c.id == conv.id)) return;
+    setState(() {
+      _conversations = [..._conversations]
+        ..insert(index.clamp(0, _conversations.length), conv);
+    });
+    unawaited(_persist());
   }
 
   /// Edit a previously sent user message: drop it and everything after it,
@@ -916,6 +950,14 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               color: ExodusTheme.ironMist, size: 21),
           tooltip: 'Search this conversation',
           onPressed: _messages.isEmpty ? null : _openSearch,
+        ),
+        IconButton(
+          icon: const Icon(Icons.flag_outlined,
+              color: ExodusTheme.ironMist, size: 21),
+          tooltip: 'Make an Active Steps plan',
+          onPressed: _messages.isEmpty || _sending || _writingPlan
+              ? null
+              : _askForPlan,
         ),
         // Brass, because starting a new conversation is the one creative
         // action up here; the rest are navigation.
@@ -1087,6 +1129,125 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ---------------- Active Steps ----------------
+
+  /// The reply carrying an unanswered plan offer, if the latest one is.
+  ChatMessage? get _openOffer {
+    final conv = _current;
+    if (conv == null || _sending) return null;
+    if (ActionPlanService.instance.forConversation(conv.id) != null) {
+      return null;
+    }
+    for (final m in conv.messages.reversed) {
+      if (m.sender == Sender.exodus) {
+        return ActionPlanService.offers(m.content) ? m : null;
+      }
+    }
+    return null;
+  }
+
+  void _declinePlan(ChatMessage offer) {
+    setState(() => offer.content = ActionPlanService.strip(offer.content));
+    _persist();
+  }
+
+  /// Ask for a plan without waiting to be offered one.
+  Future<void> _askForPlan() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final length = await showModalBottomSheet<PlanLength>(
+      context: context,
+      backgroundColor: ExodusTheme.midnight,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Active Steps',
+                  style: TextStyle(
+                    fontFamily: ExodusTheme.serif,
+                    color: ExodusTheme.parchment,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                  )),
+              const SizedBox(height: 6),
+              const Text(
+                'EXODUS will turn this conversation into one concrete goal '
+                'and a small step for each day. How long should it run?',
+                style: TextStyle(
+                    color: ExodusTheme.ironMist, fontSize: 14, height: 1.45),
+              ),
+              const SizedBox(height: 16),
+              for (final l in PlanLength.values)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.flag_outlined,
+                      color: ExodusTheme.brass),
+                  title: Text(l.label,
+                      style: const TextStyle(color: ExodusTheme.porcelain)),
+                  trailing: const Icon(Icons.chevron_right_rounded,
+                      color: ExodusTheme.ironMist),
+                  onTap: () => Navigator.pop(ctx, l),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (length != null) await _createPlan(length);
+  }
+
+  Future<void> _createPlan(PlanLength length) async {
+    final conv = _current;
+    if (conv == null || _writingPlan || _sending) return;
+    setState(() {
+      _writingPlan = true;
+      conv.planOffered = true;
+    });
+    _status.begin('Writing your ${length.label} plan…');
+    final plan = await ActionPlanService.instance
+        .create(conversation: conv, length: length, status: _status);
+    _status.done();
+    if (!mounted) return;
+    setState(() => _writingPlan = false);
+    if (plan == null) {
+      _notice(ActionPlanService.instance.lastError ??
+          'Could not write the plan. Try again.');
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    // Answer the offer, so it stops being offered.
+    final offer = conv.messages.lastWhere(
+        (m) => ActionPlanService.offers(m.content),
+        orElse: () => ChatMessage(content: '', sender: Sender.exodus));
+    offer.content = ActionPlanService.strip(offer.content);
+    final first = plan.steps.first;
+    setState(() {
+      conv.messages.add(ChatMessage(
+        content: 'Here is your plan. The goal: ${plan.goal}\n\n'
+            'Start with day one, *${first.title}*. Check each step off as '
+            'you go, and I will ask how it is going.',
+        sender: Sender.exodus,
+        planId: plan.id,
+      ));
+    });
+    conv.updatedAt = DateTime.now();
+    await _persist();
+    _scrollToEnd();
+  }
+
+  void _openPlan(String planId) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ActiveStepsScreen(
+        planId: planId,
+        onOpenConversation: openConversation,
+      ),
+    ));
+  }
+
   Widget _checkInBanner() {
     final checkIn = CheckInService.instance.current;
     if (checkIn == null) return const SizedBox.shrink();
@@ -1115,7 +1276,9 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!mounted) return;
 
     _captureMemory(_current);
-    final conv = Conversation.empty()..title = 'Checking in';
+    final conv = Conversation.empty()
+      ..title = CheckInService.titleFor(checkIn)
+      ..followUp = CheckInService.instance.threadContext(checkIn);
     setState(() {
       _conversations.insert(0, conv);
       _current = conv;
@@ -1256,28 +1419,26 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildMessages() {
     return Stack(
       children: [
-        _buildMessageList(),
-        // The thread dissolves into the composer instead of being sliced off
-        // by it mid-line.
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: 34,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    ExodusTheme.obsidian.withValues(alpha: 0),
-                    ExodusTheme.obsidian,
-                  ],
-                ),
-              ),
-            ),
-          ),
+        // The thread dissolves into the composer and under the title bar
+        // instead of being sliced off by either. A mask rather than a painted
+        // gradient: a gradient has to be painted in some colour, and on the
+        // Duo the page behind is lit unevenly, so any colour chosen showed
+        // as a band. A mask fades the text itself and lets the real
+        // background through.
+        ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (r) => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: const [
+              Colors.transparent,
+              Colors.white,
+              Colors.white,
+              Colors.transparent,
+            ],
+            stops: [0, 14 / r.height, 1 - 36 / r.height, 1],
+          ).createShader(r),
+          child: _buildMessageList(),
         ),
         // While searching, the up/down match controls own vertical movement —
         // a second jump affordance would just fight them.
@@ -1367,9 +1528,16 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // The match key goes on a wrapper, not the bubble: the bubble already
         // carries an ObjectKey, and a widget can only hold one.
         final matchKey = _matchKeys[i];
-        final keyed = matchKey == null
+        Widget keyed = matchKey == null
             ? bubble
             : KeyedSubtree(key: matchKey, child: bubble);
+        final extra = _planBelow(msg);
+        if (extra != null) {
+          keyed = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [keyed, extra],
+          );
+        }
         // Mark the turn of each day. Not above the very first message of a
         // conversation begun today: "Today" over a thread that is entirely
         // today tells nobody anything.
@@ -1383,6 +1551,33 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       },
     );
+  }
+
+  /// What sits under [msg] for Active Steps: the offer, or the plan itself.
+  Widget? _planBelow(ChatMessage msg) {
+    Widget wrap(Widget child) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+          child: Center(child: child),
+        );
+    final planId = msg.planId;
+    if (planId != null) {
+      return ListenableBuilder(
+        listenable: ActionPlanService.instance,
+        builder: (context, _) {
+          final plan = ActionPlanService.instance.byId(planId);
+          if (plan == null) return const SizedBox.shrink();
+          return wrap(PlanCard(plan: plan, onOpen: () => _openPlan(planId)));
+        },
+      );
+    }
+    if (identical(msg, _openOffer)) {
+      return wrap(PlanOfferCard(
+        working: _writingPlan,
+        onChoose: _createPlan,
+        onDecline: () => _declinePlan(msg),
+      ));
+    }
+    return null;
   }
 
   /// Delete a single message (user or assistant) from the conversation.
@@ -1430,15 +1625,27 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _composer() {
     final canSend = _hasDraft || _pendingImages.isNotEmpty;
+    // No fill behind the pill. It used to sit on an obsidian slab, which
+    // matched the page only where the page was unlit; across the Duo's wide
+    // screens the slab showed as a block with a hard top edge. Now the pill
+    // floats on the page itself, all the way to the bottom edge.
     return Container(
-      color: ExodusTheme.obsidian,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      // One pill holding attach, field and send. Previously the bar was a
-      // full-width slab with a rule above it and a 48pt button hanging off the
-      // end; the send button now sits inside the same object it acts on.
+      alignment: Alignment.center,
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      // One pill holding attach, field and send. Held to the thread's own
+      // measure on a wide screen, so it lines up with the words above it
+      // rather than stretching across the whole open phone.
       child: Container(
+        constraints: const BoxConstraints(maxWidth: 704),
         decoration: BoxDecoration(
-          color: ExodusTheme.slate.withValues(alpha: 0.6),
+          color: ExodusTheme.slate.withValues(alpha: 0.82),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
           // The pill warms while EXODUS is listening, so the state is legible
           // from the edge of the screen and not only from the red dot.
           border: Border.all(

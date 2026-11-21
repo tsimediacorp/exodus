@@ -7,12 +7,27 @@ class Conversation {
   final DateTime createdAt;
   DateTime updatedAt;
 
+  /// What this conversation is following up on, when EXODUS started it.
+  ///
+  /// A check-in opens a thread with a hidden prompt saying what EXODUS
+  /// remembered. That prompt is not a message, so it is not in the history,
+  /// and once the couple answered the model no longer knew what it had asked
+  /// about: the thread drifted as if it were a new chat. Kept here, it goes
+  /// with every turn for the life of the thread.
+  String? followUp;
+
+  /// Whether EXODUS has already offered an Active Steps plan here. It offers
+  /// once per conversation; asking again after a "not now" is nagging.
+  bool planOffered;
+
   Conversation({
     required this.id,
     required this.title,
     required this.messages,
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.followUp,
+    this.planOffered = false,
   })  : createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
@@ -44,6 +59,8 @@ class Conversation {
         'title': title,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
+        if (followUp != null) 'followUp': followUp,
+        if (planOffered) 'planOffered': true,
         'messages': messages
             .where((m) =>
                 !m.isLoading && (m.content.isNotEmpty || m.images.isNotEmpty))
@@ -56,6 +73,8 @@ class Conversation {
         title: json['title'] as String? ?? 'Conversation',
         createdAt: DateTime.parse(json['createdAt'] as String),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
+        followUp: json['followUp'] as String?,
+        planOffered: json['planOffered'] as bool? ?? false,
         messages: (json['messages'] as List<dynamic>)
             .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
             .toList(),

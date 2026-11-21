@@ -57,6 +57,24 @@ class ExodusLayout {
   static bool isExpanded(BuildContext context) =>
       widthOf(context) == ExodusWidth.expanded;
 
+  /// Width of the status column down the side of the folded Duo, or 0.
+  ///
+  /// The outer screen keeps its clock and signal in a column on the right
+  /// rather than a bar across the top, and reports that column as a right
+  /// safe-area inset that runs the full height of the screen. Below the
+  /// status items the column is empty, so EXODUS puts its navigation there
+  /// and gives the whole bottom of the screen back to content.
+  ///
+  /// Recognised by shape, not by model: a compact screen whose right inset
+  /// is deep and whose left inset is not. A notched iPhone held sideways has
+  /// insets on both sides and is wide enough to be expanded anyway.
+  static double sideColumnWidth(BuildContext context) {
+    if (isExpanded(context)) return 0;
+    final pad = MediaQuery.viewPaddingOf(context);
+    if (pad.right >= 40 && pad.left < 8) return pad.right;
+    return 0;
+  }
+
   /// Whether the user has asked the system for less motion. Every flourish
   /// added for the large screen checks this first.
   static bool reduceMotion(BuildContext context) =>

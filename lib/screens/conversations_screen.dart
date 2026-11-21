@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/conversation.dart';
 import '../services/storage_service.dart';
 import '../theme/exodus_theme.dart';
-import '../widgets/exodus_shield.dart';
+import '../widgets/conversation_tile.dart';
 import '../widgets/page_backdrop.dart';
 
 /// Every conversation, searchable and deletable.
@@ -64,9 +64,53 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   Widget build(BuildContext context) {
     final conversations = _conversations;
 
+    final embedded = widget.embedded;
+    final body = SafeArea(
+      // Beside the thread the list must not claim the rail's side inset or
+      // the bottom one; the thread beside it owns those.
+      left: !embedded,
+      child: Column(
+        children: [
+          _searchBox(),
+          Expanded(
+            child: conversations.isEmpty
+                ? _empty()
+                : ShaderMask(
+                    // Tiles dissolve at the top and bottom edges instead of
+                    // being sliced off by them.
+                    shaderCallback: (r) => LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: const [
+                        Colors.transparent,
+                        Colors.white,
+                        Colors.white,
+                        Colors.transparent,
+                      ],
+                      stops: [0, 12 / r.height, 1 - 28 / r.height, 1],
+                    ).createShader(r),
+                    blendMode: BlendMode.dstIn,
+                    child: ListView.builder(
+                      padding: embedded
+                          ? const EdgeInsets.fromLTRB(12, 8, 14, 32)
+                          : const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                      itemCount: conversations.length,
+                      itemBuilder: (_, i) => _tile(conversations[i]),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+
     return Scaffold(
-      backgroundColor: ExodusTheme.obsidian,
+      // Embedded, the list is a window onto the shell's own light, so it is
+      // see-through; pushed full screen it lights itself.
+      backgroundColor: embedded ? Colors.transparent : ExodusTheme.obsidian,
       appBar: AppBar(
+        backgroundColor: embedded ? Colors.transparent : null,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         automaticallyImplyLeading: !widget.embedded,
         centerTitle: !widget.embedded,
         title: const Text('Conversations',
@@ -89,65 +133,49 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
           ),
         ],
       ),
-      body: PageBackdrop(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: widget.embedded
-                    ? const EdgeInsets.fromLTRB(12, 4, 12, 12)
-                    : const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                child: Container(
-                  height: 48,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: ExodusTheme.midnight.withValues(alpha: 0.7),
-                    border: Border.all(color: ExodusTheme.steel),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search_rounded,
-                          size: 18, color: ExodusTheme.ironMist),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _search,
-                          onChanged: (v) =>
-                              setState(() => _query = v.trim()),
-                          style: const TextStyle(
-                              color: ExodusTheme.porcelain, fontSize: 15),
-                          cursorColor: ExodusTheme.brass,
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            filled: false,
-                            contentPadding: EdgeInsets.zero,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            hintText: 'Search conversations…',
-                            hintStyle: TextStyle(
-                                color: ExodusTheme.ironMist, fontSize: 15),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+      body: embedded ? body : PageBackdrop(child: body),
+    );
+  }
+
+  Widget _searchBox() {
+    return Padding(
+      padding: widget.embedded
+          ? const EdgeInsets.fromLTRB(12, 4, 14, 4)
+          : const EdgeInsets.fromLTRB(20, 4, 20, 4),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: ExodusTheme.midnight.withValues(alpha: 0.7),
+          border: Border.all(color: ExodusTheme.steel),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search_rounded,
+                size: 18, color: ExodusTheme.ironMist),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _search,
+                onChanged: (v) => setState(() => _query = v.trim()),
+                style:
+                    const TextStyle(color: ExodusTheme.porcelain, fontSize: 15),
+                cursorColor: ExodusTheme.brass,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  hintText: 'Search conversations…',
+                  hintStyle:
+                      TextStyle(color: ExodusTheme.ironMist, fontSize: 15),
                 ),
               ),
-              Expanded(
-                child: conversations.isEmpty
-                    ? _empty()
-                    : ListView.builder(
-                        padding: widget.embedded
-                            ? const EdgeInsets.fromLTRB(12, 0, 12, 24)
-                            : const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                        itemCount: conversations.length,
-                        itemBuilder: (_, i) => _tile(conversations[i]),
-                      ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -169,115 +197,21 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   }
 
   Widget _tile(Conversation conv) {
-    final isOpen = widget.embedded && conv.id == widget.selectedId;
-    final preview = conv.messages.isEmpty
-        ? 'No messages yet'
-        : conv.messages.last.content.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Dismissible(
-        key: ValueKey(conv.id),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          decoration: BoxDecoration(
-            color: ExodusTheme.crimson.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: const Icon(Icons.delete_outline_rounded,
-              color: ExodusTheme.porcelain),
-        ),
-        confirmDismiss: (_) async =>
-            await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: ExodusTheme.midnight,
-                title: const Text('Delete conversation?'),
-                content: Text(
-                    '“${conv.title}” will be permanently removed from this '
-                    'device.'),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancel')),
-                  TextButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Delete',
-                          style: TextStyle(color: ExodusTheme.crimson))),
-                ],
-              ),
-            ) ??
-            false,
-        onDismissed: (_) {
-          widget.onDelete(conv.id);
-          setState(() {});
-        },
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () {
-            if (!widget.embedded) Navigator.of(context).pop();
-            widget.onOpen(conv.id);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isOpen
-                  ? ExodusTheme.brass.withValues(alpha: 0.10)
-                  : ExodusTheme.midnight.withValues(alpha: 0.72),
-              border: Border.all(
-                  color: isOpen
-                      ? ExodusTheme.brass.withValues(alpha: 0.55)
-                      : ExodusTheme.steel),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: ExodusTheme.slate,
-                    border: Border.all(
-                        color: ExodusTheme.brass.withValues(alpha: 0.30)),
-                  ),
-                  child: const ExodusShield(size: 19, glow: false),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(conv.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: ExodusTheme.porcelain,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          )),
-                      const SizedBox(height: 4),
-                      Text(preview,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: ExodusTheme.ironMist,
-                              fontSize: 13,
-                              height: 1.4)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return ConversationTile(
+      key: ValueKey(conv.id),
+      conversation: conv,
+      dense: widget.embedded,
+      selected: widget.embedded && conv.id == widget.selectedId,
+      onOpen: () {
+        if (!widget.embedded) Navigator.of(context).pop();
+        widget.onOpen(conv.id);
+      },
+      onDelete: () {
+        // Storage is updated synchronously by the delete, so rebuilding now
+        // drops the dismissed row in the same frame, as Dismissible needs.
+        widget.onDelete(conv.id);
+        setState(() {});
+      },
     );
   }
 }

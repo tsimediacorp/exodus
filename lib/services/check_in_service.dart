@@ -319,6 +319,34 @@ Keep the opening short — two or three sentences. Do not lecture, and do not
 assume how it went.
 ''';
 
+  /// Standing context for the whole follow-up thread, sent with every turn.
+  ///
+  /// [seedPrompt] only shapes EXODUS's opening line. Without this, the
+  /// couple's answer arrived with no record of what was asked or why, and
+  /// the reply treated it as the start of an unrelated conversation.
+  String threadContext(CheckIn c) => '''
+
+--- THIS CONVERSATION IS A FOLLOW-UP ---
+
+You opened this conversation yourself, to follow up on something you
+remembered about this couple.
+
+WHAT PROMPTED IT: ${c.because}
+WHAT YOU ASKED: "${c.question}"
+
+Everything they say here is in answer to that, unless they clearly change the
+subject. Stay with it: build on what they tell you, ask about how it has
+actually gone since, and connect it back to what prompted it. Do not treat
+their reply as a fresh question, and do not reintroduce yourself.
+''';
+
+  /// Short, human title for the thread, from the question asked.
+  static String titleFor(CheckIn c) {
+    final q = c.question.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (q.isEmpty) return 'Checking in';
+    return q.length <= 48 ? q : '${q.substring(0, 45).trimRight()}…';
+  }
+
   /// Small helper for jittering due dates so several check-ins created in one
   /// scan don't all land on the same day.
   static int jitterDays(int base) =>

@@ -25,19 +25,14 @@ void main() {
     await open(tester);
     expect(find.byType(PageBackdrop), findsOneWidget);
 
-    final gradients = tester
-        .widgetList<DecoratedBox>(find.byType(DecoratedBox))
-        .map((d) => d.decoration)
-        .whereType<BoxDecoration>()
-        .where((d) => d.gradient is RadialGradient)
-        .toList();
-    expect(gradients, isNotEmpty, reason: 'the warm light is gone');
+    final light = find.byType(BackdropLight);
+    expect(light, findsOneWidget, reason: 'the warm light is gone');
+    // The light covers the whole backdrop, not a fixed-height box inside it.
+    expect(tester.getSize(light), tester.getSize(find.byType(PageBackdrop)));
 
-    for (final decoration in gradients) {
-      final radial = decoration.gradient as RadialGradient;
-      // It has to actually reach zero alpha, or the screen edge shows a band.
-      expect(radial.colors.last.a, 0);
-    }
+    final radial = PageBackdrop.wash(Alignment.topLeft);
+    // It has to actually reach zero alpha, or the screen edge shows a band.
+    expect(radial.colors.last.a, 0);
   });
 
   testWidgets('the wash is dithered, or it bands on near-black',
