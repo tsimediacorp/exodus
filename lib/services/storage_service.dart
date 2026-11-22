@@ -60,6 +60,7 @@ class StorageService {
   static const _kActionPlans       = 'exodus.actionPlans';
   static const _kBibleMarks        = 'exodus.bible.marks';
   static const _kBibleCoverName    = 'exodus.bible.coverName';
+  static const _kBibleCoverStyle   = 'exodus.bible.coverStyle';
   static const _kCheckInScan       = 'exodus.checkIns.lastScan';
   static const _kCheckInsEnabled   = 'exodus.checkIns.enabled';
   static const _kStudyExercises    = 'exodus.study.exercises';
@@ -411,6 +412,12 @@ class StorageService {
   String loadBibleCoverName() => _prefs?.getString(_kBibleCoverName) ?? '';
   Future<void> saveBibleCoverName(String name) async =>
       _prefs?.setString(_kBibleCoverName, name.trim());
+
+  /// The Bible's binding: 'navy', 'oxblood' or 'black'.
+  String loadBibleCoverStyle() =>
+      _prefs?.getString(_kBibleCoverStyle) ?? 'navy';
+  Future<void> saveBibleCoverStyle(String style) async =>
+      _prefs?.setString(_kBibleCoverStyle, style);
 
   bool loadBiblePagedMode() => _prefs?.getBool(_kBiblePaged) ?? true;
 

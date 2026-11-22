@@ -5,7 +5,6 @@ import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
-import '../theme/exodus_theme.dart';
 import 'bible_paper.dart';
 import 'exodus_shield.dart';
 
@@ -20,6 +19,15 @@ class BibleCover extends StatefulWidget {
   /// The name stamped under the title. Empty shows an invitation to add it.
   final String ownerName;
 
+  /// The binding: 'navy', 'oxblood' or 'black'.
+  final String style;
+
+  /// The photograph of the front board in [style].
+  static String coverAsset(String style) =>
+      'assets/bible_art/book/cover-${styles.contains(style) ? style : 'navy'}.webp';
+
+  static const List<String> styles = ['navy', 'oxblood', 'black'];
+
   /// The cover has swung fully open.
   final VoidCallback onOpened;
 
@@ -29,6 +37,7 @@ class BibleCover extends StatefulWidget {
   const BibleCover({
     super.key,
     required this.ownerName,
+    this.style = 'navy',
     required this.onOpened,
     required this.onEditName,
   });
@@ -152,7 +161,7 @@ class _BibleCoverState extends State<BibleCover> with TickerProviderStateMixin {
             // The desk fades as the book opens onto the page beneath.
             Opacity(
               opacity: (1 - o * 1.4).clamp(0.0, 1.0),
-              child: const _Desk(),
+              child: const BibleDesk(),
             ),
             SafeArea(
               child: LayoutBuilder(builder: (context, c) {
@@ -272,8 +281,9 @@ class _BibleCoverState extends State<BibleCover> with TickerProviderStateMixin {
                 opacity: open > 0.85
                     ? (1 - (open - 0.85) / 0.15).clamp(0.0, 1.0)
                     : 1,
-                child: _Cover(
+                child: BibleCoverFace(
                   ownerName: widget.ownerName,
+                  style: widget.style,
                   light: Offset(0.5 - tilt.dy * 1.6, 0.35 + tilt.dx * 1.6),
                   onEditName: widget.onEditName,
                 ),
@@ -286,19 +296,27 @@ class _BibleCoverState extends State<BibleCover> with TickerProviderStateMixin {
   }
 }
 
-class _Desk extends StatelessWidget {
-  const _Desk();
+/// The walnut desk the book lies on, lit by a lamp from the upper left.
+class BibleDesk extends StatelessWidget {
+  const BibleDesk({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment(0, -0.25),
-          radius: 1.1,
-          colors: [Color(0xFF1E2333), Color(0xFF07090F)],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset('assets/bible_art/book/desk.webp',
+            fit: BoxFit.cover, filterQuality: FilterQuality.medium),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(-0.3, -0.4),
+              radius: 1.3,
+              colors: [Color(0x00000000), Color(0x99000000)],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -338,325 +356,211 @@ class _BlockPainter extends CustomPainter {
   bool shouldRepaint(_BlockPainter old) => false;
 }
 
-/// The front board: leather, tooling, gilt, and the owner's name.
-class _Cover extends StatelessWidget {
+/// The front board: a hand-bound leather cover, gilt-tooled, with the title
+/// and the owner's name stamped into it in gold.
+///
+/// The board itself is a photograph; the lettering is set as type over its
+/// empty centre panel, so it is crisp at any size and the name can be the
+/// reader's own. Each letter is pressed in: a dark edge above where the
+/// tool bit into the leather, a catch of light below, and gilt that moves
+/// with [light].
+class BibleCoverFace extends StatelessWidget {
   final String ownerName;
+  final String style;
 
   /// Where the light falls, in fractions of the cover.
   final Offset light;
-  final VoidCallback onEditName;
+  final VoidCallback? onEditName;
 
-  const _Cover({
+  const BibleCoverFace({
+    super.key,
     required this.ownerName,
-    required this.light,
-    required this.onEditName,
+    required this.style,
+    this.light = const Offset(0.35, 0.3),
+    this.onEditName,
   });
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth;
-      final scale = (w / 300).clamp(0.6, 1.6);
-      Widget gilt(Widget child) => ShaderMask(
-            blendMode: BlendMode.srcIn,
-            shaderCallback: (r) => LinearGradient(
-              begin: Alignment(light.dx * 2 - 2, light.dy * 2 - 2),
-              end: Alignment(light.dx * 2, light.dy * 2),
-              colors: const [
-                BiblePalette.giltDeep,
-                BiblePalette.gilt,
-                BiblePalette.giltLight,
-                BiblePalette.gilt,
-                BiblePalette.giltDeep,
-              ],
-              stops: const [0, 0.35, 0.5, 0.65, 1],
-            ).createShader(r),
-            child: child,
-          );
+      final h = c.maxHeight;
+      final scale = (w / 300).clamp(0.5, 1.8);
       final named = ownerName.trim().isNotEmpty;
-      return CustomPaint(
-        painter: _LeatherPainter(light),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(w * 0.16, 0, w * 0.08, 0),
-          child: Column(
-            children: [
-              const Spacer(flex: 5),
-              // The shield, set in a gilt roundel as if stamped.
-              Container(
-                padding: EdgeInsets.all(10 * scale),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: BiblePalette.gilt.withValues(alpha: 0.75),
-                      width: 1.2),
-                ),
-                child: ExodusShield(size: 46 * scale, glow: false),
+
+      Widget stamped(String text, TextStyle style) {
+        final d = 0.9 * scale;
+        return Stack(
+          children: [
+            // The pressed edge and catch-light are decoration: read once.
+            ExcludeSemantics(
+              child: Transform.translate(
+                offset: Offset(-d * 0.6, -d),
+                child: Text(text,
+                    textAlign: TextAlign.center,
+                    style: style.copyWith(
+                        color: Colors.black.withValues(alpha: 0.55))),
               ),
-              const Spacer(flex: 3),
-              gilt(Text(
-                'HOLY',
-                style: TextStyle(
-                  fontFamily: ExodusTheme.serif,
-                  color: Colors.white,
-                  fontSize: 30 * scale,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 9 * scale,
-                  height: 1.1,
-                ),
-              )),
-              gilt(Text(
-                'BIBLE',
-                style: TextStyle(
-                  fontFamily: ExodusTheme.serif,
-                  color: Colors.white,
-                  fontSize: 30 * scale,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 9 * scale,
-                  height: 1.1,
-                ),
-              )),
-              SizedBox(height: 14 * scale),
-              gilt(Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(width: 28 * scale, height: 1, color: Colors.white),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8 * scale),
-                    child: Fleuron(color: Colors.white, size: 9 * scale),
-                  ),
-                  Container(width: 28 * scale, height: 1, color: Colors.white),
+            ),
+            ExcludeSemantics(
+              child: Transform.translate(
+                offset: Offset(d * 0.4, d * 0.7),
+                child: Text(text,
+                    textAlign: TextAlign.center,
+                    style: style.copyWith(
+                        color: Colors.white.withValues(alpha: 0.10))),
+              ),
+            ),
+            ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (r) => LinearGradient(
+                begin: Alignment(light.dx * 2 - 2, light.dy * 2 - 2),
+                end: Alignment(light.dx * 2, light.dy * 2),
+                colors: const [
+                  BiblePalette.giltDeep,
+                  BiblePalette.gilt,
+                  BiblePalette.giltLight,
+                  BiblePalette.gilt,
+                  BiblePalette.giltDeep,
                 ],
-              )),
-              const Spacer(flex: 6),
-              Semantics(
-                button: true,
-                label: named
-                    ? 'Name on the cover: $ownerName. Change it'
-                    : 'Put your name on the cover',
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: onEditName,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: named
-                        ? gilt(Text(
-                            ownerName,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            style: TextStyle(
-                              fontFamily: ExodusTheme.serif,
-                              color: Colors.white,
-                              fontSize: 19 * scale,
-                              fontStyle: FontStyle.italic,
-                              letterSpacing: 0.6,
-                            ),
-                          ))
-                        : Text(
-                            'Add your name',
-                            style: TextStyle(
-                              fontFamily: ExodusTheme.serif,
-                              color: BiblePalette.gilt.withValues(alpha: 0.45),
-                              fontSize: 14 * scale,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                  ),
+                stops: const [0, 0.35, 0.5, 0.65, 1],
+              ).createShader(r),
+              child: Text(text,
+                  textAlign: TextAlign.center,
+                  style: style.copyWith(color: Colors.white)),
+            ),
+          ],
+        );
+      }
+
+      final title = TextStyle(
+        fontFamily: 'Cormorant',
+        fontVariations: const [FontVariation('wght', 600)],
+        fontSize: 34 * scale,
+        letterSpacing: 8 * scale,
+        height: 1.05,
+      );
+
+      return ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(4),
+          bottomLeft: Radius.circular(4),
+          topRight: Radius.circular(10),
+          bottomRight: Radius.circular(10),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(BibleCover.coverAsset(style),
+                fit: BoxFit.fill, filterQuality: FilterQuality.medium),
+            // The sheen of the leather where the light falls on it.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(light.dx * 2 - 1, light.dy * 2 - 1),
+                  radius: 0.9,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.10),
+                    Colors.white.withValues(alpha: 0),
+                  ],
                 ),
               ),
-              const Spacer(flex: 2),
-              gilt(Text(
-                'EXODUS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10 * scale,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 5 * scale,
-                ),
-              )),
-              SizedBox(height: 26 * scale),
-            ],
-          ),
+            ),
+            // The lettering, in the empty panel inside the tooled border
+            // (the board's spine is at the left, so the panel sits right of
+            // centre).
+            Positioned(
+              left: w * 0.25,
+              right: w * 0.16,
+              top: h * 0.13,
+              bottom: h * 0.11,
+              child: Column(
+                children: [
+                  const Spacer(flex: 4),
+                  Container(
+                    padding: EdgeInsets.all(9 * scale),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: BiblePalette.gilt.withValues(alpha: 0.7),
+                          width: 1.1),
+                    ),
+                    child: ExodusShield(size: 40 * scale, glow: false),
+                  ),
+                  const Spacer(flex: 3),
+                  stamped('HOLY', title),
+                  stamped('BIBLE', title),
+                  SizedBox(height: 12 * scale),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                          width: 26 * scale,
+                          height: 1,
+                          color: BiblePalette.gilt.withValues(alpha: 0.8)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8 * scale),
+                        child:
+                            Fleuron(color: BiblePalette.gilt, size: 9 * scale),
+                      ),
+                      Container(
+                          width: 26 * scale,
+                          height: 1,
+                          color: BiblePalette.gilt.withValues(alpha: 0.8)),
+                    ],
+                  ),
+                  const Spacer(flex: 6),
+                  Semantics(
+                    button: onEditName != null,
+                    label: named
+                        ? 'Name on the cover: $ownerName. Change it'
+                        : 'Put your name on the cover',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onEditName,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: named
+                            ? stamped(
+                                ownerName,
+                                TextStyle(
+                                  fontFamily: 'Cormorant',
+                                  fontStyle: FontStyle.italic,
+                                  fontVariations: const [
+                                    FontVariation('wght', 600)
+                                  ],
+                                  fontSize: 21 * scale,
+                                  letterSpacing: 0.6,
+                                ),
+                              )
+                            : Text(
+                                onEditName == null ? '' : 'Add your name',
+                                style: TextStyle(
+                                  fontFamily: 'Cormorant',
+                                  fontStyle: FontStyle.italic,
+                                  color:
+                                      BiblePalette.gilt.withValues(alpha: 0.5),
+                                  fontSize: 15 * scale,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(flex: 2),
+                  stamped(
+                    'EXODUS',
+                    TextStyle(
+                      fontSize: 9 * scale,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 5 * scale,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       );
     });
   }
-}
-
-class _LeatherPainter extends CustomPainter {
-  final Offset light;
-
-  _LeatherPainter(this.light);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final board = RRect.fromRectAndCorners(
-      Offset.zero & size,
-      topLeft: const Radius.circular(5),
-      bottomLeft: const Radius.circular(5),
-      topRight: const Radius.circular(12),
-      bottomRight: const Radius.circular(12),
-    );
-    canvas.save();
-    canvas.clipRRect(board);
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF222B44), BiblePalette.leather, Color(0xFF0E1322)],
-        ).createShader(Offset.zero & size),
-    );
-    canvas.drawRect(
-        Offset.zero & size, BibleTextures.tiled(BibleTextures.leather));
-
-    // The spine: a rounder, darker band with raised bands across it.
-    final spine = w * 0.11;
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, spine, h),
-      Paint()
-        ..shader = LinearGradient(colors: [
-          Colors.black.withValues(alpha: 0.55),
-          Colors.white.withValues(alpha: 0.05),
-          Colors.black.withValues(alpha: 0.25),
-        ], stops: const [
-          0,
-          0.55,
-          1
-        ]).createShader(Rect.fromLTWH(0, 0, spine, h)),
-    );
-    for (final f in [0.16, 0.34, 0.66, 0.84]) {
-      final y = h * f;
-      final band = Rect.fromLTWH(0, y - 4, spine, 8);
-      canvas.drawRect(
-        band,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.white.withValues(alpha: 0.10),
-              Colors.black.withValues(alpha: 0.35),
-            ],
-          ).createShader(band),
-      );
-      canvas.drawLine(
-          Offset(0, y - 4.5),
-          Offset(spine, y - 4.5),
-          Paint()
-            ..color = BiblePalette.gilt.withValues(alpha: 0.5)
-            ..strokeWidth = 0.7);
-    }
-    // The hinge: a groove where the board flexes.
-    canvas.drawLine(
-        Offset(spine + 1, 0),
-        Offset(spine + 1, h),
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.6)
-          ..strokeWidth = 2.2);
-    canvas.drawLine(
-        Offset(spine + 3, 0),
-        Offset(spine + 3, h),
-        Paint()
-          ..color = Colors.white.withValues(alpha: 0.06)
-          ..strokeWidth = 1);
-
-    // Blind tooling: a pressed frame, dark below its edge, light above.
-    final panel = Rect.fromLTRB(spine + 14, 14, w - 14, h - 14);
-    final tooled = RRect.fromRectAndRadius(panel, const Radius.circular(6));
-    canvas.drawRRect(
-        tooled.shift(const Offset(0, 1)),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.4
-          ..color = Colors.white.withValues(alpha: 0.07));
-    canvas.drawRRect(
-        tooled,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.4
-          ..color = Colors.black.withValues(alpha: 0.5));
-
-    // Gilt rules inside it, double, with corner ornaments.
-    final giltPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..shader = LinearGradient(
-        begin: Alignment(light.dx * 2 - 2, light.dy * 2 - 2),
-        end: Alignment(light.dx * 2, light.dy * 2),
-        colors: const [
-          BiblePalette.giltDeep,
-          BiblePalette.gilt,
-          BiblePalette.giltLight,
-          BiblePalette.gilt,
-          BiblePalette.giltDeep,
-        ],
-        stops: const [0, 0.35, 0.5, 0.65, 1],
-      ).createShader(Offset.zero & size);
-    final outer = panel.deflate(8);
-    final inner = panel.deflate(12);
-    canvas.drawRect(outer, giltPaint..strokeWidth = 1.3);
-    canvas.drawRect(inner, giltPaint..strokeWidth = 0.6);
-    for (final corner in [
-      inner.topLeft,
-      inner.topRight,
-      inner.bottomLeft,
-      inner.bottomRight,
-    ]) {
-      final sx = corner.dx < w / 2 ? 1.0 : -1.0;
-      final sy = corner.dy < h / 2 ? 1.0 : -1.0;
-      final c = corner + Offset(sx * 10, sy * 10);
-      final leaf = Path()
-        ..moveTo(c.dx, c.dy - sy * 7)
-        ..quadraticBezierTo(c.dx + sx * 5, c.dy, c.dx, c.dy + sy * 7)
-        ..quadraticBezierTo(c.dx - sx * 5, c.dy, c.dx, c.dy - sy * 7)
-        ..moveTo(c.dx - sx * 7, c.dy)
-        ..quadraticBezierTo(c.dx, c.dy + sy * 5, c.dx + sx * 7, c.dy)
-        ..quadraticBezierTo(c.dx, c.dy - sy * 5, c.dx - sx * 7, c.dy);
-      canvas.drawPath(leaf, giltPaint..strokeWidth = 0.9);
-      canvas.drawCircle(c, 1.6, Paint()..shader = giltPaint.shader);
-    }
-
-    // Stitching around the fore-edges.
-    final stitch = Paint()
-      ..color = const Color(0xFF8C93A8).withValues(alpha: 0.35)
-      ..strokeWidth = 1.1
-      ..strokeCap = StrokeCap.round;
-    for (var x = spine + 10; x < w - 8; x += 7) {
-      canvas.drawLine(Offset(x, 6), Offset(x + 3.5, 6), stitch);
-      canvas.drawLine(Offset(x, h - 6), Offset(x + 3.5, h - 6), stitch);
-    }
-    for (var y = 10.0; y < h - 8; y += 7) {
-      canvas.drawLine(Offset(w - 6, y), Offset(w - 6, y + 3.5), stitch);
-    }
-
-    // The sheen: where the light lies across the grain.
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()
-        ..shader = RadialGradient(
-          center: Alignment(light.dx * 2 - 1, light.dy * 2 - 1),
-          radius: 0.9,
-          colors: [
-            Colors.white.withValues(alpha: 0.13),
-            Colors.white.withValues(alpha: 0.03),
-            Colors.transparent,
-          ],
-          stops: const [0, 0.45, 1],
-        ).createShader(Offset.zero & size),
-    );
-    canvas.restore();
-
-    // Board edge.
-    canvas.drawRRect(
-        board,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1
-          ..color = Colors.black.withValues(alpha: 0.6));
-  }
-
-  @override
-  bool shouldRepaint(_LeatherPainter old) => old.light != light;
 }

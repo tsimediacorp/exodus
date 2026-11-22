@@ -58,6 +58,7 @@ flutter:
     - assets/bible_art/
     - assets/bible_art/plates/
     - assets/bible_art/vignettes/
+    - assets/bible_art/book/
 
   # Spectral (SIL Open Font License 1.1, see assets/fonts/OFL.txt). The reply
   # body is set in it — EXODUS's answers are long-form devotional prose, and a
