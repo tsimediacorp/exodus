@@ -53,6 +53,11 @@ flutter:
     # Scripture-card artwork. Discovered at runtime from the asset manifest,
     # so dropping a file in is all that is needed — see the folder's README.
     - assets/backgrounds/
+    # The illustrated Bible: plates, ornaments and their catalogue. Made by
+    # tools/bible_art (see its README).
+    - assets/bible_art/
+    - assets/bible_art/plates/
+    - assets/bible_art/vignettes/
 
   # Spectral (SIL Open Font License 1.1, see assets/fonts/OFL.txt). The reply
   # body is set in it — EXODUS's answers are long-form devotional prose, and a
@@ -60,6 +65,14 @@ flutter:
   # rather than as chat. Note the theme's `fontFamily: 'Inter'` was never
   # bundled, so the UI sans has always been the platform default.
   fonts:
+    # Cormorant Garamond (SIL OFL 1.1, assets/fonts/OFL-CormorantGaramond.txt):
+    # the Bible's chapter titles, drop caps and plate captions. Variable, so
+    # weights are set with FontVariation('wght', …).
+    - family: Cormorant
+      fonts:
+        - asset: assets/fonts/CormorantGaramond-Variable.ttf
+        - asset: assets/fonts/CormorantGaramond-Italic-Variable.ttf
+          style: italic
     - family: Spectral
       fonts:
         - asset: assets/fonts/Spectral-Light.ttf
