@@ -18,6 +18,7 @@ import '../theme/exodus_theme.dart';
 import '../widgets/bible_cover.dart';
 import '../widgets/bible_pages.dart';
 import '../widgets/bible_paper.dart';
+import '../widgets/book_opening.dart';
 import '../widgets/book_spread.dart';
 import '../widgets/ink_layer.dart';
 import '../widgets/progress_view.dart';
@@ -90,6 +91,15 @@ class _BibleScreenState extends State<BibleScreen> {
   bool _showCover = false;
   bool? _folded;
   late String _coverName = _storage.loadBibleCoverName();
+  late String _coverStyle = _storage.loadBibleCoverStyle();
+
+  /// Unfolding opens the book: its cover swings over and the leaves riffle
+  /// to the reader's place (see [BookOpening]).
+  bool _opening = false;
+
+  /// Arriving at the Bible already unfolded opens it the same way, once a
+  /// session; after that it simply opens where you were.
+  static bool _openedThisSession = false;
 
   // ---- Reading aloud ----
 
@@ -107,12 +117,21 @@ class _BibleScreenState extends State<BibleScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final folded = ExodusLayout.sideColumnWidth(context) > 0;
+    final open = ExodusLayout.isExpanded(context);
+    final calm = ExodusLayout.reduceMotion(context);
     if (_folded == null) {
       // Arriving at a passage someone sent you goes straight to it.
       _showCover = folded && widget.initialRef == null;
+      if (open && !calm && widget.initialRef == null && !_openedThisSession) {
+        _opening = _paged;
+      }
     } else if (folded != _folded) {
       _showCover = folded;
+      // Unfolding the phone is opening the book.
+      _opening = !folded && open && !calm && _paged;
+      if (_opening && _narrating) _stopListening();
     }
+    if (_opening) _openedThisSession = true;
     _folded = folded;
   }
 
@@ -934,6 +953,84 @@ class _BibleScreenState extends State<BibleScreen> {
     await _storage.saveBibleCoverName(name);
   }
 
+  /// Choose the leather the Bible is bound in.
+  Future<void> _pickBinding() async {
+    const names = {'navy': 'Midnight', 'oxblood': 'Oxblood', 'black': 'Black'};
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: ExodusTheme.obsidian,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('BINDING',
+                  style: TextStyle(
+                    color: ExodusTheme.ironMist,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                  )),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  for (final style in BibleCover.styles)
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        selected: style == _coverStyle,
+                        label: '${names[style]} leather',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => Navigator.pop(ctx, style),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Column(
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: 2 / 3,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: style == _coverStyle
+                                            ? ExodusTheme.brass
+                                            : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: BibleCoverFace(
+                                        ownerName: _coverName, style: style),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(names[style]!,
+                                    style: TextStyle(
+                                      color: style == _coverStyle
+                                          ? ExodusTheme.brass
+                                          : ExodusTheme.porcelain,
+                                      fontSize: 13,
+                                    )),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (chosen == null || chosen == _coverStyle || !mounted) return;
+    setState(() => _coverStyle = chosen);
+    await _storage.saveBibleCoverStyle(chosen);
+  }
+
   void _setTool(InkTool tool) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -1078,8 +1175,23 @@ class _BibleScreenState extends State<BibleScreen> {
               color: Colors.transparent,
               child: BibleCover(
                 ownerName: _coverName,
+                style: _coverStyle,
                 onEditName: _editCoverName,
                 onOpened: () => setState(() => _showCover = false),
+              ),
+            ),
+          ),
+        if (_opening && !_showCover)
+          Positioned.fill(
+            child: Material(
+              color: Colors.transparent,
+              child: BookOpening(
+                coverStyle: _coverStyle,
+                ownerName: _coverName,
+                translationName: _bible.currentTranslation.name,
+                onDone: () {
+                  if (mounted) setState(() => _opening = false);
+                },
               ),
             ),
           ),
@@ -1106,6 +1218,8 @@ class _BibleScreenState extends State<BibleScreen> {
               setState(() => _showCover = true);
             case 'name':
               _editCoverName();
+            case 'binding':
+              _pickBinding();
           }
         },
         itemBuilder: (_) => [
@@ -1130,6 +1244,14 @@ class _BibleScreenState extends State<BibleScreen> {
             child: ListTile(
               leading: Icon(Icons.book_rounded),
               title: Text('Close the book'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'binding',
+            child: ListTile(
+              leading: Icon(Icons.auto_stories_outlined),
+              title: Text('Binding'),
               contentPadding: EdgeInsets.zero,
             ),
           ),

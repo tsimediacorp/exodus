@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:exodus/services/bible_marks.dart';
 import 'package:exodus/services/storage_service.dart';
 import 'package:exodus/widgets/bible_cover.dart';
+import 'package:exodus/widgets/book_opening.dart';
 import 'package:exodus/widgets/book_spread.dart';
 import 'package:exodus/widgets/ink_layer.dart';
 
@@ -165,8 +166,10 @@ void main() {
           ),
         ),
       ));
-      expect(find.text('The Tejadas'), findsOneWidget);
-      await tester.tap(find.text('HOLY'));
+      // Stamped lettering is drawn three times (pressed edge, catch-light,
+      // gilt) but read once.
+      expect(find.bySemanticsLabel(RegExp('The Tejadas')), findsOneWidget);
+      await tester.tap(find.text('HOLY').last);
       await tester.pumpAndSettle();
       expect(opened, 1);
     });
@@ -185,6 +188,40 @@ void main() {
       await tester.tap(find.text('Add your name'));
       expect(asked, 1);
       await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('opening the book', () {
+    Widget opening(VoidCallback done) => MaterialApp(
+          home: SizedBox(
+            width: 900,
+            height: 600,
+            child: BookOpening(
+              coverStyle: 'navy',
+              ownerName: 'The Tejadas',
+              translationName: 'King James Version',
+              onDone: done,
+            ),
+          ),
+        );
+
+    testWidgets('the cover swings over, the leaves riffle, and it is done',
+        (tester) async {
+      var done = 0;
+      await tester.pumpWidget(opening(() => done++));
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pump(const Duration(seconds: 3));
+      expect(done, 1);
+    });
+
+    testWidgets('a tap skips it', (tester) async {
+      var done = 0;
+      await tester.pumpWidget(opening(() => done++));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.tap(find.byType(BookOpening));
+      expect(done, 1);
+      await tester.pump(const Duration(seconds: 4));
+      expect(done, 1); // and only once
     });
   });
 }
