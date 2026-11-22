@@ -8,12 +8,19 @@ import 'package:flutter/material.dart';
 class BiblePalette {
   BiblePalette._();
 
-  static const paper = Color(0xFFF3EBDA);
+  static const paper = Color(0xFFF2E9D6);
   static const paperShade = Color(0xFFE6D9BF);
   static const ink = Color(0xFF2A211A);
   static const inkSoft = Color(0xFF5B4D3F);
   static const rubric = Color(0xFF9B2C22);
-  static const faint = Color(0xFF9A8A72);
+  /// Running heads, kickers, folios: faint, but still readable on paper.
+  static const faint = Color(0xFF6F604B);
+
+  /// The drop cap: a warm brown, set apart from the black of the text.
+  static const capInk = Color(0xFF5A3E22);
+
+  /// Hairline rules and printer's ornaments.
+  static const giltRule = Color(0xFF9B7A45);
   static const gilt = Color(0xFFC9A961);
   static const giltLight = Color(0xFFF1DB9A);
   static const giltDeep = Color(0xFF8C6D2C);
@@ -252,127 +259,4 @@ class PaperPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(PaperPainter old) => old.side != side;
-}
-
-/// The book around the pages: leather boards just proud of the paper, the
-/// block of pages showing at the fore-edges and foot, gilt on its edges,
-/// and a ribbon marker in the gutter.
-class BookBinding extends StatelessWidget {
-  /// 2 for an open book, 1 for a single page with the spine at the left.
-  final int pagesPerView;
-  final Widget child;
-
-  const BookBinding(
-      {super.key, required this.pagesPerView, required this.child});
-
-  /// Space the binding takes around the pages.
-  static EdgeInsets insetsFor(int perView) => perView == 2
-      ? const EdgeInsets.fromLTRB(14, 10, 14, 18)
-      : const EdgeInsets.fromLTRB(6, 8, 14, 16);
-
-  @override
-  Widget build(BuildContext context) {
-    final inset = insetsFor(pagesPerView);
-    return CustomPaint(
-      painter: _BindingPainter(pagesPerView, inset),
-      foregroundPainter: _RibbonPainter(pagesPerView, inset),
-      child: Padding(padding: inset, child: child),
-    );
-  }
-}
-
-class _BindingPainter extends CustomPainter {
-  final int per;
-  final EdgeInsets inset;
-
-  _BindingPainter(this.per, this.inset);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final board =
-        RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(10));
-    canvas.drawRRect(
-      board,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [BiblePalette.leather, BiblePalette.leatherDeep],
-        ).createShader(Offset.zero & size),
-    );
-    canvas.save();
-    canvas.clipRRect(board);
-    canvas.drawRect(Offset.zero & size,
-        BibleTextures.tiled(BibleTextures.leather, opacity: 0.9));
-    canvas.restore();
-
-    final pages = inset.deflateRect(Offset.zero & size);
-
-    // The block of pages under the open sheet: a few hairlines stepping out
-    // at the fore-edge and foot, the outermost gilt.
-    for (var i = 4; i >= 1; i--) {
-      final grow = i * 1.6;
-      final r = Rect.fromLTRB(
-        pages.left - (per == 2 ? grow : 0),
-        pages.top,
-        pages.right + grow,
-        pages.bottom + grow * 1.2,
-      );
-      canvas.drawRect(
-        r,
-        Paint()
-          ..color = i == 4
-              ? BiblePalette.giltDeep
-              : Color.lerp(
-                  BiblePalette.paperShade, BiblePalette.giltDeep, i / 5)!,
-      );
-    }
-    // Shadow of the open sheets on the block and boards.
-    canvas.drawRect(
-      pages.inflate(1),
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.35)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BindingPainter old) => old.per != per;
-}
-
-class _RibbonPainter extends CustomPainter {
-  final int per;
-  final EdgeInsets inset;
-
-  _RibbonPainter(this.per, this.inset);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final pages = inset.deflateRect(Offset.zero & size);
-    // A ribbon from the head of the gutter, out past the foot.
-    final x = per == 2 ? pages.center.dx + 10 : pages.left + 22;
-    const w = 9.0;
-    final top = pages.bottom - 26;
-    final bottom = size.height - 1;
-    final path = Path()
-      ..moveTo(x, top)
-      ..lineTo(x + w, top)
-      ..lineTo(x + w, bottom)
-      ..lineTo(x + w / 2, bottom - 5)
-      ..lineTo(x, bottom)
-      ..close();
-    canvas.drawShadow(path, Colors.black, 2, false);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..shader = LinearGradient(colors: [
-          BiblePalette.ribbon,
-          Color.lerp(BiblePalette.ribbon, Colors.white, 0.18)!,
-          BiblePalette.ribbon,
-        ]).createShader(Rect.fromLTWH(x, top, w, bottom - top)),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RibbonPainter old) => old.per != per;
 }

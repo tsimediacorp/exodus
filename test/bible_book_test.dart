@@ -115,25 +115,23 @@ void main() {
       expect(find.text('page 0').hitTestable(), findsNothing);
     });
 
-    test('the leaf curls from the free edge and lands flat', () {
-      PageCurlPainter at(double t) => PageCurlPainter(
-            t: t,
-            grab: 0.5,
-            spine: 0,
-            page: const Size(300, 500),
-            front: null,
-            back: null,
-            paper: Colors.white,
-          );
-      // Untouched: the roll sits at the fore-edge.
-      expect(at(0).geometry.axis, closeTo(300, 1));
-      // Mid-turn the roll has travelled toward the spine and has body.
-      final mid = at(0.5).geometry;
-      expect(mid.axis, inInclusiveRange(0, 200));
-      expect(mid.radius, greaterThan(20));
-      // Landed: no roll left, so the page lies flat on the other side.
-      expect(at(1).geometry.radius, lessThan(1));
-      expect(at(1).geometry.axis, closeTo(0, 1));
+    test('the leaf lifts from the free edge, arches, and lands flat', () {
+      const page = Size(300, 500);
+      double edge(double t, {bool projected = false}) => PageCurlPainter.edgeAt(
+          t: t, page: page, spine: 300, cameraX: 300, projected: projected);
+      // Untouched it lies flat on the right; turned, flat on the left.
+      expect(edge(0, projected: true), closeTo(600, 1));
+      expect(edge(1, projected: true), closeTo(0, 1));
+      // Mid-turn it stands up off the book: nearer the reader, so larger.
+      expect(edge(0.3, projected: true), greaterThan(edge(0.3)));
+      // The edge moves steadily across: the finger can always find it.
+      for (var t = 0.0; t < 1; t += 0.05) {
+        expect(edge(t + 0.05), lessThan(edge(t)));
+      }
+      // The free edge leads: early on it has lifted while the spine side
+      // still lies flat.
+      expect(PageCurlPainter.angleAt(0.15, 1), greaterThan(0.6));
+      expect(PageCurlPainter.angleAt(0.15, 0), lessThan(0.05));
     });
 
     test('painting a turn mid-way does not throw', () {
@@ -144,6 +142,7 @@ void main() {
           t: t,
           grab: 0.9,
           spine: 150,
+          cameraX: 150,
           page: const Size(150, 400),
           front: null,
           back: null,

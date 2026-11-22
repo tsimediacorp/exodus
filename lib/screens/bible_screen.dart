@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,13 +8,15 @@ import '../layout/exodus_layout.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
 import '../services/bible_marks.dart';
-import '../services/bible_paginator.dart';
+import '../services/bible_art.dart';
 import '../services/bible_service.dart';
+import '../services/bible_typesetter.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../theme/exodus_theme.dart';
 import '../widgets/bible_cover.dart';
+import '../widgets/bible_pages.dart';
 import '../widgets/bible_paper.dart';
 import '../widgets/book_spread.dart';
 import '../widgets/ink_layer.dart';
@@ -118,56 +122,190 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Scrolling stays available for anyone who prefers it.
   late bool _paged = _storage.loadBiblePagedMode();
 
-  List<BiblePage> _pages = const [];
+  final BibleArt _art = BibleArt.instance;
+
+  /// The chapter set in type, and the pages it falls on.
+  TypesetChapter? _set;
+  List<_Leaf> _leaves = const [];
+  _Heading? _heading;
   int _pageIndex = 0;
 
-  /// Inputs the current pagination was computed for. Re-measuring every verse
-  /// on every rebuild would be wasteful, so it only recomputes when the
-  /// translation, chapter, viewport or text scale actually changes.
-  String? _paginatedFor;
+  /// Pages a view: 2 unfolded (facing pages), 1 folded.
+  int _per = 1;
+
+  /// Inputs the current typesetting was made for. Setting a chapter is not
+  /// free, so it is only redone when the translation, chapter, page size,
+  /// pages a view or text scale actually change.
+  String? _setFor;
+
+  /// Bumped when a chapter's art has decoded, so the pictures the turning
+  /// leaf is textured with are retaken with the plates on them.
+  int _artRev = 0;
 
   /// A verse to land on once pages exist — set by a deep link, consumed on
-  /// the first pagination pass.
+  /// the first typesetting pass.
   int? _pendingVerseJump;
 
-  /// Recompute pages if anything they depend on has changed.
-  void _repaginate(List<String> verses, Size area, TextScaler scaler) {
-    final key = '${_bible.currentTranslation.id}/$_bookIndex/$_chapter/'
-        '${area.width.round()}x${area.height.round()}/'
-        '${scaler.scale(100).round()}';
-    if (key == _paginatedFor) return;
+  static const _ones = [
+    '',
+    'One',
+    'Two',
+    'Three',
+    'Four',
+    'Five',
+    'Six',
+    'Seven',
+    'Eight',
+    'Nine',
+    'Ten',
+    'Eleven',
+    'Twelve',
+    'Thirteen',
+    'Fourteen',
+    'Fifteen',
+    'Sixteen',
+    'Seventeen',
+    'Eighteen',
+    'Nineteen'
+  ];
+  static const _tens = [
+    '',
+    '',
+    'Twenty',
+    'Thirty',
+    'Forty',
+    'Fifty',
+    'Sixty',
+    'Seventy',
+    'Eighty',
+    'Ninety'
+  ];
 
-    final pages = BiblePaginator.paginate(
-      verses: verses,
-      // Measured at the width the words actually get: each verse row is
-      // padded 8pt either side, and measuring at the full page width let
-      // lines wrap later on paper than on screen, so a full page overflowed.
-      size: Size(area.width - _verseRowInset, area.height),
-      verseTextStyle: _verseTextStyle,
-      verseNumberStyle: _verseNumberStyle,
-      verseSpacing: _verseSpacing,
-      textScaler: scaler,
+  /// "Fourteen", "One Hundred and Nineteen": chapters as a book names them.
+  static String numberWords(int n) {
+    if (n >= 100) {
+      final rest = n % 100;
+      return 'One Hundred${rest == 0 ? '' : ' and ${numberWords(rest)}'}';
+    }
+    if (n < 20) return _ones[n];
+    final one = n % 10;
+    return '${_tens[n ~/ 10]}${one == 0 ? '' : '-${_ones[one]}'}';
+  }
+
+  /// The heading over the chapter's first page.
+  _Heading _headingFor(
+      List<BiblePlate> plates, int per, double width, double content) {
+    final plate = plates.isEmpty ? null : plates.first;
+    final psalm = _bookName == 'Psalms';
+    final chapterName =
+        '${psalm ? 'Psalm' : 'Chapter'} ${numberWords(_chapter)}';
+    final kicker = plate == null ? _bookName : '$_bookName · $chapterName';
+    final title = plate?.title ?? chapterName;
+    // Folded, the plate is let into the head of the page; unfolded it has a
+    // page of its own facing this one, and an ornament heads the text.
+    final headpiece = per == 1 ? plate?.asset : null;
+    final headpieceHeight =
+        headpiece == null ? 0.0 : math.min(content * 0.34, width * 0.74);
+    final vignette =
+        headpiece == null ? _art.vignetteFor(_bookIndex, _chapter) : null;
+    final titleSize = per == 2 ? 36.0 : 32.0;
+    return _Heading(
+      kicker: kicker,
+      title: title,
+      vignette: vignette,
+      headpiece: headpiece,
+      headpieceHeight: headpieceHeight,
+      titleSize: titleSize,
+      height: ChapterHeading.measure(
+        width: width,
+        title: title,
+        kicker: kicker,
+        hasVignette: vignette != null,
+        headpieceHeight: headpieceHeight,
+        titleSize: titleSize,
+      ),
     );
+  }
+
+  /// Set the chapter in type for pages of [page] size, and lay out the
+  /// leaves of the book: the opening, the plates where they fall, the text,
+  /// and a tailpiece.
+  void _typeset(List<String> verses, Size page, int per, TextScaler scaler) {
+    final key = '${_bible.currentTranslation.id}/$_bookIndex/$_chapter/'
+        '${page.width.round()}x${page.height.round()}/$per/'
+        '${scaler.scale(100).round()}/${_art.isLoaded}';
+    if (key == _setFor) return;
 
     // Keep the reader on the verse they were looking at, rather than snapping
     // to page one whenever the viewport changes.
-    final anchor = _pendingVerseJump ??
-        (_pages.isEmpty || _pageIndex >= _pages.length
-            ? null
-            : _pages[_pageIndex].firstVerse);
-    final target =
-        anchor == null ? 0 : BiblePaginator.pageIndexOf(pages, anchor);
+    final anchor =
+        _pendingVerseJump ?? (_set == null ? null : _firstVisibleVerse);
 
-    _pages = pages;
-    _pageIndex = target.clamp(0, pages.length - 1);
-    _paginatedFor = key;
+    final side = per == 2 ? PageSide.left : PageSide.single;
+    final m = PageMargins.of(side);
+    final width = page.width - m.horizontal;
+    final content = page.height - m.vertical;
+    final plates = _art.platesFor(_bookIndex, _chapter);
+    final heading = _headingFor(plates, per, width, content);
+    final set = TypesetChapter.layout(
+      verses: verses,
+      width: width,
+      type: bibleTypeFor(width, scaler),
+      openingHeight: content - heading.height,
+      pageHeight: content,
+      omittedLabel: _omittedLabel,
+    );
+
+    // Plates after the first stand after the page their verse is on.
+    final later = [
+      for (final p in plates.skip(1)) (set.sliceOfVerse(p.verse), p)
+    ];
+    final leaves = <_Leaf>[const _ProseLeaf(0)];
+    if (per == 2 && plates.isNotEmpty) leaves.add(_PlateLeaf(plates.first));
+    for (var s = 0; s < set.slices.length; s++) {
+      if (s > 0) leaves.add(_ProseLeaf(s));
+      for (final (at, p) in later) {
+        if (at == s) leaves.add(_PlateLeaf(p));
+      }
+    }
+    if (per == 1 || leaves.length.isOdd) leaves.add(const _EndLeaf());
+
+    final old = _set;
+    WidgetsBinding.instance.addPostFrameCallback((_) => old?.dispose());
+    _set = set;
+    _heading = heading;
+    _leaves = leaves;
+    _per = per;
+    _setFor = key;
     _pendingVerseJump = null;
+    _pageIndex = anchor == null
+        ? _pageIndex.clamp(0, leaves.length - 1)
+        : _leafOfVerse(anchor);
 
-    // Pages are measured during layout, after the footer has already been
-    // built, so the footer needs one more pass to show the new count.
+    final art = [
+      for (final p in plates) p.asset,
+      if (heading.vignette != null) heading.vignette!,
+      if (_art.vignetteFor(_bookIndex, _chapter + 1) case final v?) v,
+    ];
+    // Pages are measured during layout, after the chrome has been built, so
+    // it needs one more pass to show the new count; and the art is decoded
+    // now, so the plates are on the paper before the leaf is lifted.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      precacheChapterArt(context, art).then((_) {
+        if (mounted) setState(() => _artRev++);
+      });
     });
+  }
+
+  /// The leaf on which verse [v] begins.
+  int _leafOfVerse(int v) {
+    final set = _set;
+    if (set == null || _leaves.isEmpty) return 0;
+    final slice = set.sliceOfVerse(v);
+    final i = _leaves.indexWhere((l) => l is _ProseLeaf && l.slice == slice);
+    return i < 0 ? 0 : i;
   }
 
   /// Swap between turning pages and continuous scrolling. Persisted, because
@@ -176,12 +314,11 @@ class _BibleScreenState extends State<BibleScreen> {
     HapticFeedback.selectionClick();
     // Keep the reader where they were: remember the verse currently on screen
     // so the other mode opens at the same place.
-    final anchor = _paged && _pageIndex < _pages.length
-        ? _pages[_pageIndex].firstVerse
-        : _highlight?.verseStart;
+    final anchor =
+        _paged && _set != null ? _firstVisibleVerse : _highlight?.verseStart;
     setState(() {
       _paged = !_paged;
-      _paginatedFor = null;
+      _setFor = null;
       if (anchor != null) _pendingVerseJump = anchor;
     });
     await _storage.saveBiblePagedMode(_paged);
@@ -204,12 +341,6 @@ class _BibleScreenState extends State<BibleScreen> {
     height: 1.55,
     fontFeatures: [FontFeature.oldstyleFigures()],
   );
-
-  /// Must match the vertical space _verseRow adds around each verse.
-  static const double _verseSpacing = 16;
-
-  /// Must match the horizontal padding _verseRow puts around the text.
-  static const double _verseRowInset = 16;
 
   @override
   void initState() {
@@ -238,7 +369,13 @@ class _BibleScreenState extends State<BibleScreen> {
       _status.begin(_bible.isLoaded
           ? 'Opening…'
           : 'Loading the ${BibleService.translation} — all 66 books…');
-      await _bible.load();
+      // The art is a nicety; a reader without it still reads.
+      await Future.wait([
+        _bible.load(),
+        _art.load().catchError((Object e) {
+          debugPrint('Bible art unavailable: $e');
+        }),
+      ]);
       if (!mounted) return;
       _status.done();
       final target =
@@ -268,11 +405,10 @@ class _BibleScreenState extends State<BibleScreen> {
     if (_paged) {
       // Pages may not be measured yet (first open); park the target and let
       // the pagination pass land on it.
-      if (_pages.isEmpty) {
+      if (_set == null) {
         _pendingVerseJump = start;
       } else {
-        final target = BiblePaginator.pageIndexOf(_pages, start);
-        setState(() => _pageIndex = target);
+        setState(() => _pageIndex = _leafOfVerse(start));
       }
       return;
     }
@@ -346,7 +482,7 @@ class _BibleScreenState extends State<BibleScreen> {
       _note = null;
       _selected.clear();
       _pageIndex = 0;
-      _paginatedFor = null; // force a re-measure for the new chapter
+      _setFor = null; // set the new chapter in type
     });
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
@@ -682,9 +818,14 @@ class _BibleScreenState extends State<BibleScreen> {
 
   /// The first verse on the page (or spread) in front of the reader.
   int get _firstVisibleVerse {
-    if (_paged && _pages.isNotEmpty) {
-      final i = _spreads ? (_pageIndex ~/ 2) * 2 : _pageIndex;
-      return _pages[i.clamp(0, _pages.length - 1)].firstVerse;
+    final set = _set;
+    if (_paged && set != null && _leaves.isNotEmpty) {
+      final start = _per == 2 ? (_pageIndex ~/ 2) * 2 : _pageIndex;
+      for (var i = start; i < _leaves.length; i++) {
+        final leaf = _leaves[i];
+        if (leaf is _ProseLeaf) return set.firstVerseOn(leaf.slice);
+      }
+      return set.verseCount;
     }
     return _highlight?.verseStart ?? 1;
   }
@@ -740,10 +881,10 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Turn to (or scroll to) verse [v].
   void _bringIntoView(int v) {
     if (_paged) {
-      if (_pages.isEmpty) return;
-      final target = BiblePaginator.pageIndexOf(_pages, v);
-      final now = _spreads ? _pageIndex ~/ 2 : _pageIndex;
-      final next = _spreads ? target ~/ 2 : target;
+      if (_set == null) return;
+      final target = _leafOfVerse(v);
+      final now = _per == 2 ? _pageIndex ~/ 2 : _pageIndex;
+      final next = _per == 2 ? target ~/ 2 : target;
       if (now != next) setState(() => _pageIndex = target);
       return;
     }
@@ -911,9 +1052,8 @@ class _BibleScreenState extends State<BibleScreen> {
         // Page breaks were measured against the old text. Drop them and let
         // the next layout pass re-measure, which is the only place the
         // viewport size is known.
-        _pages = const [];
         _pageIndex = 0;
-        _paginatedFor = null;
+        _setFor = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -947,12 +1087,81 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
+  /// Everything else: reading mode, notes, the cover, scroll or turn.
+  Widget _moreMenu(Color color) => PopupMenuButton<String>(
+        tooltip: 'More',
+        enabled: !_loading,
+        icon: Icon(Icons.more_vert_rounded, color: color),
+        color: ExodusTheme.midnight,
+        onSelected: (v) {
+          switch (v) {
+            case 'read':
+              _toggleImmersive();
+            case 'notes':
+              _showNotes();
+            case 'mode':
+              _toggleReadingMode();
+            case 'close':
+              if (_narrating) _stopListening();
+              setState(() => _showCover = true);
+            case 'name':
+              _editCoverName();
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(
+            value: 'read',
+            child: ListTile(
+              leading: Icon(Icons.chrome_reader_mode_outlined),
+              title: Text('Reading mode'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'notes',
+            child: ListTile(
+              leading: Icon(Icons.sticky_note_2_outlined),
+              title: Text('Your notes'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'close',
+            child: ListTile(
+              leading: Icon(Icons.book_rounded),
+              title: Text('Close the book'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'name',
+            child: ListTile(
+              leading: Icon(Icons.draw_rounded),
+              title: Text('Name on the cover'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'mode',
+            child: ListTile(
+              leading: Icon(
+                  _paged ? Icons.view_stream_rounded : Icons.menu_book_rounded),
+              title: Text(_paged ? 'Scroll instead' : 'Turn pages'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ],
+      );
+
   Widget _reader(BuildContext context) {
     final drawing = _tool != InkTool.off;
+    // Turning pages, the book is the whole screen: paper to the edges, its
+    // controls drawn on the head of the page. Scrolling keeps the bar.
+    final book = _paged && !_loading && _loadError == null;
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0E17),
+      backgroundColor: book ? BiblePalette.paper : const Color(0xFF0B0E17),
       // Reading mode takes the bar away entirely; the page runs to the top.
-      appBar: _immersive
+      appBar: _immersive || _paged
           ? null
           : AppBar(
               title: _loading
@@ -1027,81 +1236,41 @@ class _BibleScreenState extends State<BibleScreen> {
                       color: ExodusTheme.covenantGlow),
                   onPressed: _loading ? null : _search,
                 ),
-                PopupMenuButton<String>(
-                  tooltip: 'More',
-                  enabled: !_loading,
-                  icon: const Icon(Icons.more_vert_rounded,
-                      color: ExodusTheme.ironMist),
-                  color: ExodusTheme.midnight,
-                  onSelected: (v) {
-                    switch (v) {
-                      case 'read':
-                        _toggleImmersive();
-                      case 'notes':
-                        _showNotes();
-                      case 'mode':
-                        _toggleReadingMode();
-                      case 'close':
-                        if (_narrating) _stopListening();
-                        setState(() => _showCover = true);
-                      case 'name':
-                        _editCoverName();
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: 'read',
-                      child: ListTile(
-                        leading: Icon(Icons.chrome_reader_mode_outlined),
-                        title: Text('Reading mode'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'notes',
-                      child: ListTile(
-                        leading: Icon(Icons.sticky_note_2_outlined),
-                        title: Text('Your notes'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'close',
-                      child: ListTile(
-                        leading: Icon(Icons.book_rounded),
-                        title: Text('Close the book'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'name',
-                      child: ListTile(
-                        leading: Icon(Icons.draw_rounded),
-                        title: Text('Name on the cover'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'mode',
-                      child: ListTile(
-                        leading: Icon(_paged
-                            ? Icons.view_stream_rounded
-                            : Icons.menu_book_rounded),
-                        title: Text(_paged ? 'Scroll instead' : 'Turn pages'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ],
-                ),
+                _moreMenu(ExodusTheme.ironMist),
               ],
             ),
+      // Scrolling, the selection bar takes its place under the text. Turning
+      // pages it floats over the foot of the page instead: giving it room
+      // would shorten every page and reflow the chapter under the reader's
+      // finger the moment they touched a verse.
       bottomNavigationBar:
-          _selected.isEmpty || drawing ? null : _selectionBar(),
+          _selected.isEmpty || drawing || book ? null : _selectionBar(),
       body: Stack(
         children: [
           Positioned.fill(
             child: SafeArea(top: !_immersive, child: _body()),
           ),
+          if (_paged && !_immersive)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(bottom: false, child: _inkChrome()),
+            ),
+          if (book && !_immersive)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(top: false, child: _bookFooter()),
+            ),
+          if (book && _selected.isNotEmpty && !drawing)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _selectionBar(),
+            ),
           // The pen's tools float over the page rather than pushing it up,
           // so the page does not reflow under the pen as the bar appears.
           Positioned(
@@ -1129,7 +1298,7 @@ class _BibleScreenState extends State<BibleScreen> {
                           : 'none'),
                   // Clear of the chapter footer when there is one.
                   padding:
-                      EdgeInsets.only(bottom: _paged && !_immersive ? 52 : 0),
+                      EdgeInsets.only(bottom: _paged && !_immersive ? 44 : 0),
                   child: drawing
                       ? _penBar()
                       : _narrating
@@ -1437,276 +1606,332 @@ class _BibleScreenState extends State<BibleScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               // Pages depend on the viewport and the reader's text scale, so
-              // they are measured here and recomputed when either changes —
-              // a rotation or an accessibility change must not leave verses
-              // stranded off the bottom of a page.
-              final scaler = MediaQuery.textScalerOf(context);
+              // the chapter is set here and reset when either changes — a
+              // rotation or an accessibility change must not leave words
+              // stranded off the foot of a page.
+              final scaler =
+                  MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.8);
 
               // An open book unfolded, two facing pages with the spine on the
               // fold; folded, one page with the spine at its left edge.
               final per = ExodusLayout.isExpanded(context) ? 2 : 1;
-              _spreads = per == 2;
-              final binding = BookBinding.insetsFor(per);
-              const margin = EdgeInsets.fromLTRB(8, 6, 8, 4);
-              final bookW =
-                  constraints.maxWidth - margin.horizontal - binding.horizontal;
-              final bookH =
-                  constraints.maxHeight - margin.vertical - binding.vertical;
-              final area = Size(
-                bookW / per - _pageOuter - _pageInner,
-                bookH - _runningHead - _folioHeight,
-              );
-              _repaginate(verses, area, scaler);
-              return Padding(
-                padding: margin,
-                child: BookBinding(
-                  pagesPerView: per,
-                  child: BookSpread(
-                    pagesPerView: per,
-                    pageCount: _pages.length,
-                    spread: per == 2 ? _pageIndex ~/ 2 : _pageIndex,
-                    interactive: _tool == InkTool.off,
-                    reduceMotion: ExodusLayout.reduceMotion(context),
-                    paperColor: BiblePalette.paper,
-                    revision: Object.hash(
-                      _bookIndex,
-                      _chapter,
-                      _bible.currentTranslation.id,
-                      _marksRev,
-                      Object.hashAll(_selected),
-                      _highlight?.verseStart,
-                      _narratedVerse,
-                      _pages.length,
-                    ),
-                    onSpreadChanged: (s) => setState(() => _pageIndex =
-                        (per == 2 ? s * 2 : s).clamp(0, _pages.length - 1)),
-                    pageBuilder: (context, i) => _paperPage(
-                      _pages[i],
-                      verses,
-                      side: per == 1
-                          ? PageSide.single
-                          : i.isEven
-                              ? PageSide.left
-                              : PageSide.right,
-                      number: i + 1,
-                    ),
-                    blankBuilder: (context) =>
-                        _endPage(per == 1 ? PageSide.single : PageSide.right),
-                  ),
+              final page =
+                  Size(constraints.maxWidth / per, constraints.maxHeight);
+              _typeset(verses, page, per, scaler);
+              final decor = _decor();
+              return BookSpread(
+                pagesPerView: per,
+                pageCount: _leaves.length,
+                spread: per == 2 ? _pageIndex ~/ 2 : _pageIndex,
+                interactive: _tool == InkTool.off,
+                reduceMotion: ExodusLayout.reduceMotion(context),
+                paperColor: BiblePalette.paper,
+                revision: Object.hash(
+                  _setFor,
+                  _marksRev,
+                  Object.hashAll(_selected),
+                  _highlight?.verseStart,
+                  _narratedVerse,
+                  _artRev,
+                ),
+                onSpreadChanged: (s) => setState(() => _pageIndex =
+                    (per == 2 ? s * 2 : s).clamp(0, _leaves.length - 1)),
+                pageBuilder: (context, i) => _leafPage(i, per, decor),
+                blankBuilder: (context) => PaperPage(
+                  side: per == 1 ? PageSide.single : PageSide.right,
+                  child: const SizedBox.expand(),
                 ),
               );
             },
           ),
         ),
-        if (!_immersive) _pageFooter(),
       ],
     );
   }
 
-  /// True while the reader is showing facing pages (unfolded).
-  bool _spreads = false;
+  /// How each verse looks on the page and what touching it does.
+  ProseDecor _decor() {
+    final marks = _chapterMarks;
+    return ProseDecor(
+      selected: _selected,
+      narrated: _narratedVerse,
+      highlightStart: _highlight?.verseStart,
+      highlightEnd: _highlight?.verseEnd,
+      legacy: {
+        for (final e in marks.highlights.entries)
+          e.key: MarkColors.markers[e.value % MarkColors.markers.length],
+      },
+      notes: marks.notes,
+      onVerseTap: _toggleVerse,
+      onNoteTap: _editNote,
+      ink: (verses, rectOf, child) => InkLayer(
+        book: _bookIndex,
+        chapter: _chapter,
+        verses: verses,
+        verseRect: rectOf,
+        tool: _tool,
+        inkColor: _inkColor,
+        markerColor: _markerColor,
+        child: child,
+      ),
+    );
+  }
 
-  /// Page margins: wider at the spine than at the fore-edge, as in a
-  /// printed book, so no verse runs into the fold.
-  static const double _pageOuter = 20;
-  static const double _pageInner = 26;
-  static const double _runningHead = 34;
-  static const double _folioHeight = 24;
+  /// Leaf [i] of the chapter.
+  Widget _leafPage(int i, int per, ProseDecor decor) {
+    final side = per == 1
+        ? PageSide.single
+        : i.isEven
+            ? PageSide.left
+            : PageSide.right;
+    if (i >= _leaves.length) {
+      return PaperPage(side: side, child: const SizedBox.expand());
+    }
+    final verses = _displayVerses;
+    switch (_leaves[i]) {
+      case _PlateLeaf(:final plate):
+        final v = plate.verse;
+        return PlatePage(
+          plate: plate,
+          side: side,
+          caption: PlatePage.captionFor(
+              v >= 1 && v <= verses.length ? verses[v - 1] : ''),
+          reference: '$_bookName $_chapter:$v',
+        );
+      case _EndLeaf():
+        final hasNext =
+            _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
+        final nextBook = _chapter < _chapterCount ? _bookIndex : _bookIndex + 1;
+        final nextChapter = _chapter < _chapterCount ? _chapter + 1 : 1;
+        return ChapterEndPage(
+          side: side,
+          label: 'Here ends $_bookName $_chapter',
+          vignette: _art.vignetteFor(_bookIndex, _chapter + 1),
+          nextLabel: hasNext
+              ? 'Turn to ${_bible.bookName(nextBook)} $nextChapter'
+              : null,
+          onNext: hasNext ? () => _changeChapter(1) : null,
+        );
+      case _ProseLeaf(:final slice):
+        return _prosePage(slice, side, i, decor);
+    }
+  }
 
-  /// One printed page: running head, verses, folio.
-  Widget _paperPage(BiblePage page, List<String> verses,
-      {required PageSide side, required int number}) {
-    final spineLeft = side != PageSide.left;
-    final range = page.firstVerse == page.lastVerse
-        ? '${page.firstVerse}'
-        : '${page.firstVerse}\u2013${page.lastVerse}';
+  /// A page of the chapter's text; the first carries its heading.
+  Widget _prosePage(int slice, PageSide side, int index, ProseDecor decor) {
+    final m = PageMargins.of(side);
+    final set = _set!;
+    final heading = slice == 0 ? _heading : null;
     return PaperPage(
       side: side,
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: spineLeft ? _pageInner : _pageOuter,
-          right: spineLeft ? _pageOuter : _pageInner,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // The running head: book, chapter and verses, at the outer
-            // corner, over a hairline rule.
-            SizedBox(
-              height: _runningHead,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: spineLeft
-                    ? CrossAxisAlignment.end
-                    : CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${_bookName.toUpperCase()} $_chapter:$range',
-                    style: const TextStyle(
-                      fontFamily: ExodusTheme.serif,
-                      color: BiblePalette.faint,
-                      fontSize: 10.5,
-                      letterSpacing: 1.8,
-                      fontWeight: FontWeight.w600,
+      child: Stack(
+        children: [
+          Positioned(
+            left: m.left,
+            right: m.right,
+            top: m.top,
+            bottom: m.bottom,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (heading != null)
+                  // Measured unscaled, so drawn unscaled: the heading is
+                  // display type, and a scaled title would no longer fit the
+                  // space measured for it.
+                  MediaQuery.withNoTextScaling(
+                    child: ChapterHeading(
+                      kicker: heading.kicker,
+                      title: heading.title,
+                      vignette: heading.vignette,
+                      headpiece: heading.headpiece,
+                      headpieceHeight: heading.headpieceHeight,
+                      titleSize: heading.titleSize,
                     ),
                   ),
-                  const SizedBox(height: 5),
-                  Container(
-                    height: 0.6,
-                    color: BiblePalette.faint.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-              ),
-            ),
-            // The whole page takes ink, margins included, not only the lines.
-            Expanded(
-              child: _inked(
-                page.firstVerse,
-                page.lastVerse,
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var v = page.firstVerse; v <= page.lastVerse; v++)
-                      if (v - 1 < verses.length) _verseRow(v, verses[v - 1]),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(
-              height: _folioHeight,
-              child: Center(
-                child: Text('$number',
-                    style: const TextStyle(
-                      fontFamily: ExodusTheme.serif,
-                      color: BiblePalette.faint,
-                      fontSize: 11,
-                      fontFeatures: [FontFeature.oldstyleFigures()],
-                    )),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// The page after a chapter's last: an ornament and the way on, rather
-  /// than an empty sheet.
-  Widget _endPage(PageSide side) {
-    final hasNext =
-        _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
-    return PaperPage(
-      side: side,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Fleuron(color: BiblePalette.rubric, size: 14),
-              const SizedBox(height: 12),
-              Text('End of $_bookName $_chapter',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontFamily: ExodusTheme.serif,
-                    color: BiblePalette.inkSoft,
-                    fontSize: 17,
-                    fontStyle: FontStyle.italic,
-                  )),
-              if (hasNext) ...[
-                const SizedBox(height: 18),
-                OutlinedButton.icon(
-                  onPressed: () => _changeChapter(1),
-                  icon: const Icon(Icons.east_rounded, size: 16),
-                  label: const Text('Next chapter'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: BiblePalette.rubric,
-                    side: BorderSide(
-                        color: BiblePalette.rubric.withValues(alpha: 0.5)),
-                    shape: const StadiumBorder(),
-                  ),
+                ProseView(
+                  chapter: set,
+                  slice: slice,
+                  decor: decor,
+                  notesOnLeft: side == PageSide.left,
                 ),
               ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _spreadLabel() {
-    final first = (_pageIndex ~/ 2) * 2 + 1;
-    final last = first + 1 > _pages.length ? first : first + 1;
-    return first == last
-        ? 'Page $first of ${_pages.length}'
-        : 'Pages $first\u2013$last of ${_pages.length}';
-  }
-
-  /// Page position plus chapter stepping, so the couple is never stuck at the
-  /// end of a chapter with nowhere to go.
-  Widget _pageFooter() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-      decoration: const BoxDecoration(
-        color: ExodusTheme.obsidian,
-        border: Border(top: BorderSide(color: ExodusTheme.steel)),
-      ),
-      child: Row(
-        children: [
-          _footerButton(
-            icon: Icons.chevron_left,
-            label: 'Previous chapter',
-            onTap: (_chapter > 1 || _bookIndex > 0)
-                ? () => _changeChapter(-1)
-                : null,
-          ),
-          Expanded(
-            child: Text(
-              _pages.length <= 1
-                  ? '$_bookName $_chapter'
-                  : _spreads
-                      ? _spreadLabel()
-                      : 'Page ${_pageIndex + 1} of ${_pages.length}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: ExodusTheme.ironMist,
-                fontSize: 12,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
             ),
           ),
-          _footerButton(
-            icon: Icons.chevron_right,
-            label: 'Next chapter',
-            onTap: (_chapter < _chapterCount ||
-                    _bookIndex < _bible.books.length - 1)
-                ? () => _changeChapter(1)
-                : null,
+          Positioned(
+            bottom: 16,
+            left: side == PageSide.left ? m.left : null,
+            right: side == PageSide.left ? null : m.right,
+            child: Folio(index + 1),
           ),
         ],
       ),
     );
   }
 
-  Widget _footerButton({
-    required IconData icon,
-    required String label,
-    VoidCallback? onTap,
-  }) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(icon,
-              size: 22,
-              color: onTap == null ? ExodusTheme.steel : ExodusTheme.ironMist),
+  /// The reader's controls, drawn in ink on the head of the page rather than
+  /// in a bar over it.
+  Widget _inkChrome() {
+    final drawing = _tool != InkTool.off;
+    final ink = _loading ? ExodusTheme.ironMist : BiblePalette.faint;
+    final nav = Navigator.of(context);
+    Widget icon(IconData i, String label, VoidCallback? onTap,
+            {Color? color}) =>
+        IconButton(
+          tooltip: label,
+          iconSize: 20,
+          color: color ?? ink,
+          disabledColor: ink.withValues(alpha: 0.35),
+          onPressed: _loading ? null : onTap,
+          icon: Icon(i),
+        );
+    return SizedBox(
+      height: 50,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            if (nav.canPop())
+              icon(Icons.arrow_back_ios_new_rounded, 'Back', nav.maybePop),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Semantics(
+                  button: true,
+                  label: 'Change book and chapter',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: _loading ? null : _pickBook,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 44),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // The book's name gives way before the chapter
+                            // number does.
+                            Flexible(
+                              child: Text(
+                                _loading ? 'BIBLE' : _bookName.toUpperCase(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: ChapterHeading.kickerStyle.copyWith(
+                                    color: ink,
+                                    fontSize: 11,
+                                    letterSpacing: 1.6),
+                              ),
+                            ),
+                            if (!_loading)
+                              Text(' $_chapter',
+                                  style: ChapterHeading.kickerStyle.copyWith(
+                                      color: ink,
+                                      fontSize: 11,
+                                      letterSpacing: 1.6)),
+                            Icon(Icons.arrow_drop_down, size: 18, color: ink),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (BibleService.hasChoice)
+              Semantics(
+                button: true,
+                label: 'Change translation',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _loading ? null : _pickTranslation,
+                  child: Container(
+                    constraints:
+                        const BoxConstraints(minHeight: 44, minWidth: 44),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(BibleService.translation,
+                        style: TextStyle(
+                          fontFamily: 'Spectral',
+                          color: ink,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1,
+                        )),
+                  ),
+                ),
+              ),
+            icon(
+              _narrating
+                  ? Icons.stop_circle_outlined
+                  : Icons.headphones_outlined,
+              _narrating ? 'Stop reading aloud' : 'Read aloud',
+              () => _listen(),
+              color: _narrating ? BiblePalette.rubric : null,
+            ),
+            icon(
+              drawing ? Icons.edit_off_outlined : Icons.border_color_outlined,
+              drawing ? 'Put the pen down' : 'Highlight and draw',
+              () => _setTool(drawing ? InkTool.off : InkTool.marker),
+              color: drawing ? BiblePalette.rubric : null,
+            ),
+            icon(Icons.auto_awesome_outlined, 'Ask EXODUS to find a passage',
+                _search),
+            _moreMenu(ink),
+          ],
         ),
+      ),
+    );
+  }
+
+  /// Where the reader is in the chapter, and the way to the next one, at the
+  /// foot of the book.
+  Widget _bookFooter() {
+    final total = _leaves.length;
+    final String where;
+    if (total <= 1) {
+      where = '';
+    } else if (_per == 2) {
+      final first = (_pageIndex ~/ 2) * 2 + 1;
+      final last = math.min(first + 1, total);
+      where = '  ·  ${first == last ? first : '$first\u2013$last'} of $total';
+    } else {
+      where = '  ·  ${_pageIndex + 1} of $total';
+    }
+    const ink = BiblePalette.faint;
+    return SizedBox(
+      height: 44,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            tooltip: 'Previous chapter',
+            iconSize: 20,
+            color: ink,
+            disabledColor: ink.withValues(alpha: 0.3),
+            onPressed: (_chapter > 1 || _bookIndex > 0)
+                ? () => _changeChapter(-1)
+                : null,
+            icon: const Icon(Icons.chevron_left_rounded),
+          ),
+          Text('$_bookName $_chapter$where',
+              style: const TextStyle(
+                fontFamily: 'Spectral',
+                fontSize: 11.5,
+                fontStyle: FontStyle.italic,
+                color: ink,
+                fontFeatures: [FontFeature.oldstyleFigures()],
+              )),
+          IconButton(
+            tooltip: 'Next chapter',
+            iconSize: 20,
+            color: ink,
+            disabledColor: ink.withValues(alpha: 0.3),
+            onPressed: (_chapter < _chapterCount ||
+                    _bookIndex < _bible.books.length - 1)
+                ? () => _changeChapter(1)
+                : null,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
       ),
     );
   }
@@ -2107,4 +2332,47 @@ class _BookPickerState extends State<_BookPicker> {
       ],
     );
   }
+}
+
+/// A leaf of the open chapter.
+sealed class _Leaf {
+  const _Leaf();
+}
+
+/// A page of the chapter's text: band [slice] of the typeset chapter.
+class _ProseLeaf extends _Leaf {
+  final int slice;
+  const _ProseLeaf(this.slice);
+}
+
+/// A full page of art.
+class _PlateLeaf extends _Leaf {
+  final BiblePlate plate;
+  const _PlateLeaf(this.plate);
+}
+
+/// The tailpiece after the chapter's last page.
+class _EndLeaf extends _Leaf {
+  const _EndLeaf();
+}
+
+/// The heading over a chapter's first page, as measured.
+class _Heading {
+  final String kicker;
+  final String title;
+  final String? vignette;
+  final String? headpiece;
+  final double headpieceHeight;
+  final double titleSize;
+  final double height;
+
+  const _Heading({
+    required this.kicker,
+    required this.title,
+    required this.vignette,
+    required this.headpiece,
+    required this.headpieceHeight,
+    required this.titleSize,
+    required this.height,
+  });
 }

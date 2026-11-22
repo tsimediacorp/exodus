@@ -89,6 +89,7 @@ class _BookSpreadState extends State<BookSpread>
   );
 
   double _pageWidth = 1;
+  double _pageHeight = 1;
 
   /// Where on the page's height the finger took hold, 0 top to 1 bottom.
   double _grab = 0.8;
@@ -140,7 +141,7 @@ class _BookSpreadState extends State<BookSpread>
       _captureQueued = false;
       if (!mounted) return;
       final ratio =
-          math.min(2.0, MediaQuery.maybeDevicePixelRatioOf(context) ?? 2.0);
+          math.min(3.0, MediaQuery.maybeDevicePixelRatioOf(context) ?? 2.0);
       for (final i in missing) {
         if (_pictures.containsKey(i)) continue;
         final ro = _slotKeys[i]?.currentContext?.findRenderObject();
@@ -178,36 +179,83 @@ class _BookSpreadState extends State<BookSpread>
 
   // ---- Gesture ----
 
+  /// Where the drag began, in views, and how far the finger has gone since.
+  double _dragFrom = 0;
+  double _dragDx = 0;
+  double _spineX = 0;
+  double _cameraX = 0;
+
   void _onDragStart(DragStartDetails d, double height) {
     _pos.stop();
     _grab = height <= 0 ? 0.8 : (d.localPosition.dy / height).clamp(0.0, 1.0);
+    _dragFrom = _pos.value;
+    _dragDx = 0;
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    // A full turn is the width of one page: drag from the outer edge to the
-    // spine and the leaf is upright; on to the far edge and it has landed.
-    final next = _pos.value - d.primaryDelta! / _pageWidth;
-    // Resist past the covers instead of stopping dead, so the end of a
-    // chapter feels like the end of a book rather than a wall.
+    _dragDx += d.primaryDelta!;
+    _pos.value = _positionForDrag();
+  }
+
+  /// The turn that puts the leaf's free edge under the finger.
+  ///
+  /// The edge does not travel linearly with the turn (it rises toward the
+  /// reader, then falls), so a fixed pixels-per-turn ratio would make the
+  /// page slide under the finger. Instead the edge's projected position is
+  /// inverted: find the t at which it is where the finger is.
+  double _positionForDrag() {
     final max = (_viewCount - 1).toDouble();
-    double v = next;
-    if (next < 0) v = next * 0.25;
-    if (next > max) v = max + (next - max) * 0.25;
-    _pos.value = v;
+    final from = _dragFrom.clamp(0.0, max);
+    var base = from.floorToDouble();
+    var t0 = from - base;
+    // From rest, the direction of the drag picks the leaf: leftward lifts
+    // the right-hand page, rightward brings the left-hand one back.
+    if (t0 < 0.0005 && _dragDx > 0) {
+      if (base <= 0) return -_dragDx / (_pageWidth * 8); // the front cover
+      base -= 1;
+      t0 = 1;
+    }
+    if (t0 < 0.0005 && _dragDx < 0 && base >= max) {
+      return max - _dragDx / (_pageWidth * 8); // the last page
+    }
+    final page = Size(_pageWidth, _pageHeight);
+    double edge(double t) => PageCurlPainter.edgeAt(
+        t: t, page: page, spine: _spineX, cameraX: _cameraX, projected: false);
+    final target = edge(t0) + _dragDx;
+    // The edge moves from the fore-edge to the far side as t goes 0 to 1.
+    var lo = 0.0, hi = 1.0;
+    for (var i = 0; i < 28; i++) {
+      final mid = (lo + hi) / 2;
+      if (edge(mid) > target) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return base + (lo + hi) / 2;
   }
 
   void _onDragEnd(DragEndDetails d) {
-    final velocity = -(d.primaryVelocity ?? 0) / _pageWidth; // views/sec
+    // About two page widths of finger travel make a whole turn.
+    final velocity = -(d.primaryVelocity ?? 0) / (_pageWidth * 1.7);
     final base = _pos.value.floorToDouble();
     final frac = _pos.value - base;
     double target;
-    if (velocity.abs() > 0.6) {
+    if (velocity.abs() > 0.45) {
       target = velocity > 0 ? base + 1 : base;
     } else {
       target = frac > 0.5 ? base + 1 : base;
     }
     target = target.clamp(0, (_viewCount - 1).toDouble());
     _settleTo(target.round(), velocity: velocity);
+  }
+
+  /// Turn one view forward or back, as a tap in the margin does.
+  void turn(int direction) {
+    final target = (_pos.value.round() + direction).clamp(0, _viewCount - 1);
+    if (target == _pos.value.round() && !_pos.isAnimating) return;
+    _grab = 0.72;
+    _settleTo(target, velocity: direction * 0.6);
   }
 
   void _settleTo(int target, {required double velocity}) {
@@ -278,12 +326,24 @@ class _BookSpreadState extends State<BookSpread>
       if ((width - _pageWidth).abs() > 0.5) _forgetPictures();
       _pageWidth = width;
       final height = constraints.maxHeight;
+      _pageHeight = height;
+      _spineX = _per == 2 ? width : 0;
+      _cameraX = constraints.maxWidth / 2;
       return GestureDetector(
         behavior: HitTestBehavior.translucent,
         onHorizontalDragStart:
             widget.interactive ? (d) => _onDragStart(d, height) : null,
         onHorizontalDragUpdate: widget.interactive ? _onDragUpdate : null,
         onHorizontalDragEnd: widget.interactive ? _onDragEnd : null,
+        // A tap in the outer margins turns the page, as a thumb at the
+        // edge of a book does. Taps on the words are the page's own.
+        onTapUp: widget.interactive
+            ? (d) {
+                final x = d.localPosition.dx / constraints.maxWidth;
+                if (x > 0.84) turn(1);
+                if (x < 0.16) turn(-1);
+              }
+            : null,
         child: AnimatedBuilder(
           animation: _pos,
           builder: (context, _) =>
@@ -345,6 +405,7 @@ class _BookSpreadState extends State<BookSpread>
                 t: t,
                 grab: _grab,
                 spine: _per == 2 ? page.width : 0,
+                cameraX: _per == 2 ? page.width : page.width / 2,
                 page: page,
                 front: front,
                 back: back,
@@ -358,15 +419,25 @@ class _BookSpreadState extends State<BookSpread>
   }
 }
 
-/// Paints one leaf part-way through a turn, and the shadow it throws.
+/// Paints one leaf part-way through a turn, and what it throws on the pages
+/// beneath it.
 ///
-/// The leaf lies to the right of [spine]. [t] runs from 0 (flat, unturned)
-/// to 1 (flat on the other side of the spine).
+/// The leaf is hinged at [spine] and lies to its right. As [t] runs from 0
+/// (flat, unturned) to 1 (flat on the other side), the paper lifts toward
+/// the reader and arches over: the free edge leads and the part by the
+/// spine follows, so mid-turn the page stands in an arch rather than as a
+/// flat card. Each row of the mesh is bent the same way, except that a page
+/// taken by a corner turns from that corner first ([grab]).
+///
+/// The bent sheet is projected through a camera above [cameraX] (the
+/// spine when two pages are open), so the leaf grows as it comes up off
+/// the book, the way a page does in the hand.
 @visibleForTesting
 class PageCurlPainter extends CustomPainter {
   final double t;
   final double grab;
   final double spine;
+  final double cameraX;
   final Size page;
   final ui.Image? front;
   final ui.Image? back;
@@ -376,25 +447,66 @@ class PageCurlPainter extends CustomPainter {
     required this.t,
     required this.grab,
     required this.spine,
+    double? cameraX,
     required this.page,
     required this.front,
     required this.back,
     required this.paper,
-  });
+  }) : cameraX = cameraX ?? spine;
 
-  static const int _cols = 32;
-  static const int _rows = 22;
+  static const int _cols = 40;
+  static const int _rows = 18;
 
-  /// The leaf's geometry at [t]: radius of the roll, where its axis lies,
-  /// and how far it is tilted.
-  ({double radius, double axis, double tilt}) get geometry {
+  /// The camera's height above the book, in page widths.
+  static const double _focal = 5.0;
+
+  /// How far the free edge leads the spine side, at its most. Large, so the
+  /// half by the spine stays low while the outer half curls over: seen from
+  /// above, most of the page's face stays readable through the turn,
+  /// instead of the leaf standing up edge-on like a card.
+  static const double _lead = 1.0 * math.pi;
+
+  /// The paper's angle at fraction [u] of the way from spine to edge, for a
+  /// row at turn [t]: 0 lies flat on the right, pi flat on the left.
+  static double angleAt(double t, double u) {
+    final lift = math.sin(math.pi * t.clamp(0.0, 1.0));
+    final lead = _lead * lift;
+    final base = math.pi * t - lead / 2;
+    final edge = math.pi * t + lead / 2;
+    return (base + (edge - base) * math.pow(u, 2.6)).clamp(0.0, math.pi);
+  }
+
+  /// Where the free edge is at turn [t] (along the middle row).
+  ///
+  /// [projected] gives where it appears on screen. For following the finger
+  /// the flat position is used instead: it moves steadily from one side to
+  /// the other, where the projected one first swells outward as the edge
+  /// lifts toward the reader, which would make the leaf stutter under the
+  /// finger at the start of a turn.
+  static double edgeAt({
+    required double t,
+    required Size page,
+    required double spine,
+    required double cameraX,
+    bool projected = true,
+  }) {
     final w = page.width;
+    var x = 0.0, z = 0.0;
+    for (var i = 0; i < _cols; i++) {
+      final a = angleAt(t, (i + 0.5) / _cols);
+      x += w / _cols * math.cos(a);
+      z += w / _cols * math.sin(a);
+    }
+    if (!projected) return spine + x;
+    final f = w * _focal;
+    return cameraX + (spine + x - cameraX) * f / (f - z);
+  }
+
+  /// The turn as the row at fraction [v] of the height feels it: taken by a
+  /// corner, the rows nearer that corner are further on.
+  double _rowT(double v) {
     final lift = math.sin(math.pi * t);
-    final radius = w * 0.15 * lift + 0.5;
-    final axis = w * (1 - t) - math.pi * radius / 2 * t;
-    // Taken by a bottom corner, the roll leans so that corner leads.
-    final tilt = (grab - 0.5) * 0.55 * lift;
-    return (radius: radius, axis: axis, tilt: tilt);
+    return (t + 0.11 * lift * (grab - 0.5) * 2 * (v - 0.5) * 2).clamp(0.0, 1.0);
   }
 
   @override
@@ -402,11 +514,8 @@ class PageCurlPainter extends CustomPainter {
     final w = page.width;
     final h = page.height;
     if (w <= 0 || h <= 0) return;
-    final g = geometry;
-    final r = g.radius;
-    final nx = math.cos(g.tilt), ny = math.sin(g.tilt);
-    final focal = w * 3.2;
     final lift = math.sin(math.pi * t);
+    final f = w * _focal;
 
     const n = (_cols + 1) * (_rows + 1);
     final pos = Float32List(n * 2);
@@ -414,50 +523,50 @@ class PageCurlPainter extends CustomPainter {
     final texBack = Float32List(n * 2);
     final colFront = Int32List(n);
     final colBack = Int32List(n);
-    final z = Float32List(n);
-    final phi = Float32List(n);
 
+    // Light from above the reader's shoulder, a little from the left.
+    const lx = -0.30, ly = -0.22, lz = 1.0;
+    final ll = math.sqrt(lx * lx + ly * ly + lz * lz);
+
+    var minX = double.infinity, maxX = -double.infinity;
     for (var j = 0; j <= _rows; j++) {
-      final v = h * j / _rows;
+      final v = j / _rows;
+      final rowT = _rowT(v);
+      final y = h * v;
+      var x = 0.0, z = 0.0;
       for (var i = 0; i <= _cols; i++) {
-        final u = w * i / _cols;
         final k = j * (_cols + 1) + i;
-        final d = (u - g.axis) * nx + (v - h / 2) * ny;
-        double nd = d, zz = 0, a = 0;
-        if (d > 0) {
-          if (d < math.pi * r) {
-            a = d / r;
-            nd = r * math.sin(a);
-            zz = r * (1 - math.cos(a));
-          } else {
-            a = math.pi;
-            nd = -(d - math.pi * r);
-            zz = 2 * r;
-          }
-        }
-        final x = u + (nd - d) * nx;
-        final y = v + (nd - d) * ny;
-        final s = focal / (focal - zz);
-        pos[k * 2] = spine + x * s;
+        final a = angleAt(rowT, i / _cols);
+        final s = f / (f - z);
+        final px = cameraX + (spine + x - cameraX) * s;
+        pos[k * 2] = px;
         pos[k * 2 + 1] = h / 2 + (y - h / 2) * s;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        final u = w * i / _cols;
         texFront[k * 2] = u;
-        texFront[k * 2 + 1] = v;
+        texFront[k * 2 + 1] = y;
         texBack[k * 2] = w - u;
-        texBack[k * 2 + 1] = v;
-        z[k] = zz;
-        phi[k] = a;
-        // Light from above: the face brightens as it turns toward it, with
-        // a sheen along the roll where paper catches the light edge-on.
-        final c = math.cos(a);
-        final sheen = math.exp(-math.pow(a - 1.15, 2) / 0.05) * 0.10;
-        final fb = (0.62 + 0.38 * c.clamp(0.0, 1.0) + sheen).clamp(0.0, 1.0);
-        final bb = (0.70 + 0.30 * (-c).clamp(0.0, 1.0)).clamp(0.0, 1.0);
-        colFront[k] = _grey(fb);
-        colBack[k] = _grey(bb * 0.97);
+        texBack[k * 2 + 1] = y;
+        // The face's normal, lit: the front faces the reader at 0 and turns
+        // away past a right angle; the back does the opposite.
+        final nx = -math.sin(a), nz = math.cos(a);
+        final d = (nx * lx + nz * lz) / ll;
+        final sheen = math.exp(-math.pow(a - 0.95, 2) / 0.05) * 0.08 * lift;
+        colFront[k] = _grey((0.52 + 0.48 * d.clamp(0.0, 1.0) + sheen));
+        colBack[k] = _grey(0.80 + 0.20 * (-d).clamp(0.0, 1.0));
+        if (i < _cols) {
+          final mid = angleAt(rowT, (i + 0.5) / _cols);
+          x += w / _cols * math.cos(mid);
+          z += w / _cols * math.sin(mid);
+        }
       }
     }
 
-    // Split the triangles by which face of the paper they show.
+    // Split the triangles by the face they show. Along a row the sheet only
+    // ever rises, so the triangles nearer the edge are nearer the reader:
+    // drawing the front set (nearer the spine) before the back set paints
+    // the leaf back to front.
     final frontIdx = <int>[];
     final backIdx = <int>[];
     for (var j = 0; j < _rows; j++) {
@@ -470,8 +579,8 @@ class PageCurlPainter extends CustomPainter {
           [a, b, c],
           [b, d, c],
         ]) {
-          final area = _area(pos, tri[0], tri[1], tri[2]);
-          (area >= 0 ? frontIdx : backIdx).addAll(tri);
+          (_area(pos, tri[0], tri[1], tri[2]) >= 0 ? frontIdx : backIdx)
+              .addAll(tri);
         }
       }
     }
@@ -479,33 +588,71 @@ class PageCurlPainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(Offset.zero & size);
 
-    // 1. The shadow the roll throws on the page it is uncovering.
-    _castShadow(canvas, g, lift);
-
-    // 2. The face still facing up.
-    _drawFace(canvas, pos, texFront, colFront, frontIdx, front, paper);
-    // Ambient darkening where the paper starts to bend away from the light.
-    _bendShade(canvas, g, lift);
-
-    // 3. The part that has rolled over hovers above it: a soft shadow,
-    //    then the back of the leaf.
-    if (backIdx.isNotEmpty) {
-      final silhouette = Path();
-      for (var q = 0; q < backIdx.length; q += 3) {
-        silhouette.addPolygon([
-          for (var m = 0; m < 3; m++)
-            Offset(pos[backIdx[q + m] * 2], pos[backIdx[q + m] * 2 + 1]),
-        ], true);
+    // 1. The pages beneath dim a little while the leaf is up, and take a
+    //    shadow beside it, longest when it stands highest.
+    if (lift > 0.01) {
+      canvas.drawRect(Offset.zero & size,
+          Paint()..color = Colors.black.withValues(alpha: 0.05 * lift));
+      final reach = w * (0.05 + 0.24 * lift);
+      final alpha = 0.22 * lift;
+      if (maxX < spine + w - 1) {
+        final r = Rect.fromLTWH(maxX, 0, reach, h);
+        canvas.drawRect(
+            r,
+            Paint()
+              ..shader = LinearGradient(colors: [
+                Colors.black.withValues(alpha: alpha),
+                Colors.black.withValues(alpha: 0),
+              ]).createShader(r));
       }
-      canvas.drawShadow(
-          silhouette, Colors.black, (2 * r * 0.18).clamp(1.0, 9.0), false);
+      if (minX < spine - 1) {
+        final r = Rect.fromLTWH(minX - reach, 0, reach, h);
+        canvas.drawRect(
+            r,
+            Paint()
+              ..shader = LinearGradient(colors: [
+                Colors.black.withValues(alpha: 0),
+                Colors.black.withValues(alpha: alpha),
+              ]).createShader(r));
+      }
+      // The leaf's own shadow, soft and wide as it rises.
+      final outline = Path();
+      for (var i = 0; i <= _cols; i++) {
+        final k = i;
+        i == 0
+            ? outline.moveTo(pos[k * 2], pos[k * 2 + 1])
+            : outline.lineTo(pos[k * 2], pos[k * 2 + 1]);
+      }
+      for (var j = 1; j <= _rows; j++) {
+        final k = j * (_cols + 1) + _cols;
+        outline.lineTo(pos[k * 2], pos[k * 2 + 1]);
+      }
+      for (var i = _cols - 1; i >= 0; i--) {
+        final k = _rows * (_cols + 1) + i;
+        outline.lineTo(pos[k * 2], pos[k * 2 + 1]);
+      }
+      outline.close();
+      canvas.drawShadow(outline, Colors.black, 6 + 14 * lift, false);
+    }
+
+    // 2. The leaf: its front, then its back.
+    _drawFace(canvas, pos, texFront, colFront, frontIdx, front, paper);
+    if (back != null) {
       _drawFace(canvas, pos, texBack, colBack, backIdx, back, paper);
+    } else {
+      // One page a view, the leaf's back is the paper itself, and Bible
+      // paper is thin: the page's own print shows through it, reversed.
+      _drawFace(canvas, pos, texBack, colBack, backIdx, null, paper);
+      if (front != null) {
+        _drawFace(canvas, pos, texBack, colBack, backIdx, front, paper,
+            opacity: 0.13);
+      }
     }
     canvas.restore();
   }
 
   static int _grey(double b) {
-    final v = (b * 255).round().clamp(0, 255);
+    final v = (b.clamp(0.0, 1.0) * 255).round();
     return 0xFF000000 | (v << 16) | (v << 8) | v;
   }
 
@@ -514,99 +661,50 @@ class PageCurlPainter extends CustomPainter {
       (p[c * 2] - p[a * 2]) * (p[b * 2 + 1] - p[a * 2 + 1]);
 
   void _drawFace(Canvas canvas, Float32List pos, Float32List tex,
-      Int32List colors, List<int> idx, ui.Image? image, Color fallback) {
+      Int32List colors, List<int> idx, ui.Image? image, Color fallback,
+      {double opacity = 1}) {
     if (idx.isEmpty) return;
-    final vertices = ui.Vertices.raw(
-      VertexMode.triangles,
-      pos,
-      textureCoordinates: image == null ? null : tex,
-      colors: colors,
-      indices: Uint16List.fromList(idx),
-    );
-    final paint = Paint();
     if (image != null) {
+      final vertices = ui.Vertices.raw(
+        VertexMode.triangles,
+        pos,
+        textureCoordinates: tex,
+        colors: colors,
+        indices: Uint16List.fromList(idx),
+      );
       final sx = image.width / page.width;
       final sy = image.height / page.height;
-      paint.shader = ImageShader(
-        image,
-        TileMode.clamp,
-        TileMode.clamp,
-        Matrix4.diagonal3Values(1 / sx, 1 / sy, 1).storage,
-        filterQuality: FilterQuality.medium,
+      canvas.drawVertices(
+        vertices,
+        BlendMode.modulate,
+        Paint()
+          ..color = Colors.white.withValues(alpha: opacity)
+          ..shader = ImageShader(
+            image,
+            TileMode.clamp,
+            TileMode.clamp,
+            Matrix4.diagonal3Values(1 / sx, 1 / sy, 1).storage,
+            filterQuality: FilterQuality.medium,
+          ),
       );
-      canvas.drawVertices(vertices, BlendMode.modulate, paint);
-    } else {
-      // No picture to wrap: plain paper. Vertex colours win over the paint
-      // colour when there is no shader, so the paper is baked into them.
       vertices.dispose();
-      final tinted = Int32List(colors.length);
-      for (var i = 0; i < colors.length; i++) {
-        final b = (colors[i] & 0xFF) / 255;
-        tinted[i] = Color.fromARGB(
-          255,
-          ((fallback.r * 255) * b).round().clamp(0, 255),
-          ((fallback.g * 255) * b).round().clamp(0, 255),
-          ((fallback.b * 255) * b).round().clamp(0, 255),
-        ).toARGB32();
-      }
-      final plain = ui.Vertices.raw(VertexMode.triangles, pos,
-          colors: tinted, indices: Uint16List.fromList(idx));
-      canvas.drawVertices(plain, BlendMode.src, Paint());
-      plain.dispose();
       return;
     }
-    vertices.dispose();
-  }
-
-  /// Along the line where the roll meets the page below, out toward the
-  /// fore-edge, fading. Strongest mid-turn, when the leaf stands highest.
-  void _castShadow(Canvas canvas, ({double radius, double axis, double tilt}) g,
-      double lift) {
-    if (lift <= 0.01) return;
-    final w = page.width;
-    final h = page.height;
-    final crest = g.axis + g.radius;
-    final reach = w * (0.08 + 0.16 * lift);
-    canvas.save();
-    canvas.translate(spine + crest * math.cos(g.tilt), h / 2);
-    canvas.rotate(g.tilt);
-    final rect = Rect.fromLTWH(0, -h, reach, h * 2);
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = LinearGradient(colors: [
-          Colors.black.withValues(alpha: 0.38 * lift),
-          Colors.black.withValues(alpha: 0.10 * lift),
-          Colors.black.withValues(alpha: 0),
-        ], stops: const [
-          0,
-          0.35,
-          1
-        ]).createShader(rect),
-    );
-    canvas.restore();
-  }
-
-  /// Just inside the axis the face is starting to bend away from the light.
-  void _bendShade(Canvas canvas, ({double radius, double axis, double tilt}) g,
-      double lift) {
-    if (lift <= 0.01) return;
-    final h = page.height;
-    final band = g.radius * 0.9 + 6;
-    canvas.save();
-    canvas.translate(spine + g.axis * math.cos(g.tilt), h / 2);
-    canvas.rotate(g.tilt);
-    final rect = Rect.fromLTWH(-band, -h, band, h * 2);
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..blendMode = BlendMode.multiply
-        ..shader = LinearGradient(colors: [
-          Colors.white.withValues(alpha: 0),
-          const Color(0xFFB9AC96).withValues(alpha: 0.35 * lift),
-        ]).createShader(rect),
-    );
-    canvas.restore();
+    // No picture to wrap: plain paper, its shading baked into the colours.
+    final tinted = Int32List(colors.length);
+    for (var i = 0; i < colors.length; i++) {
+      final b = (colors[i] & 0xFF) / 255;
+      tinted[i] = Color.fromARGB(
+        255,
+        ((fallback.r * 255) * b).round().clamp(0, 255),
+        ((fallback.g * 255) * b).round().clamp(0, 255),
+        ((fallback.b * 255) * b).round().clamp(0, 255),
+      ).toARGB32();
+    }
+    final plain = ui.Vertices.raw(VertexMode.triangles, pos,
+        colors: tinted, indices: Uint16List.fromList(idx));
+    canvas.drawVertices(plain, BlendMode.src, Paint());
+    plain.dispose();
   }
 
   @override
@@ -616,5 +714,6 @@ class PageCurlPainter extends CustomPainter {
       old.front != front ||
       old.back != back ||
       old.page != page ||
-      old.spine != spine;
+      old.spine != spine ||
+      old.cameraX != cameraX;
 }

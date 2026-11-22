@@ -29,6 +29,11 @@ class InkLayer extends StatefulWidget {
   /// Keys on the verse rows, to find where each one sits.
   final Map<int, GlobalKey> verseKeys;
 
+  /// Where verse [v] sits in this layer, when the verses are not separate
+  /// rows (set as running prose, a verse is a run of words across lines).
+  /// Takes the place of [verseKeys].
+  final Rect? Function(int verse)? verseRect;
+
   final InkTool tool;
 
   /// Index into [MarkColors.ink] for the pen, [MarkColors.markers] for the
@@ -42,7 +47,8 @@ class InkLayer extends StatefulWidget {
     required this.book,
     required this.chapter,
     required this.verses,
-    required this.verseKeys,
+    this.verseKeys = const {},
+    this.verseRect,
     required this.tool,
     required this.inkColor,
     this.markerColor = 0,
@@ -71,6 +77,7 @@ class _InkLayerState extends State<InkLayer> {
 
   /// Where verse [v] sits in this layer, or null if it is not laid out here.
   Rect? _rectOf(int v) {
+    if (widget.verseRect != null) return widget.verseRect!(v);
     final layer = _layer;
     final ro = widget.verseKeys[v]?.currentContext?.findRenderObject();
     if (layer == null || ro is! RenderBox || !ro.attached || !ro.hasSize) {
