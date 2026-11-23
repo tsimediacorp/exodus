@@ -16,11 +16,47 @@ class PageMargins {
   static const double head = 58;
   static const double foot = 44;
 
-  static EdgeInsets of(PageSide side) => switch (side) {
-        PageSide.left => const EdgeInsets.fromLTRB(40, head, 34, foot),
-        PageSide.right => const EdgeInsets.fromLTRB(34, head, 40, foot),
-        PageSide.single => const EdgeInsets.fromLTRB(30, head, 26, foot),
-      };
+  /// The margins of a page, widened where the page runs under the screen's
+  /// own furniture ([screen]: the status column, the home indicator).
+  ///
+  /// Facing pages widen both outer margins alike, so the two text blocks
+  /// stay the same width and the spread stays symmetrical about the spine,
+  /// as a printed one is.
+  static EdgeInsets of(PageSide side, [EdgeInsets screen = EdgeInsets.zero]) {
+    const outer = 40.0;
+    final widest = math.max(screen.left, screen.right);
+    final out = widest == 0 ? outer : math.max(outer, widest + 14);
+    final top = head + screen.top;
+    final bottom = foot + screen.bottom;
+    return switch (side) {
+      PageSide.left => EdgeInsets.fromLTRB(out, top, 34, bottom),
+      PageSide.right => EdgeInsets.fromLTRB(34, top, out, bottom),
+      PageSide.single =>
+        EdgeInsets.fromLTRB(30 + screen.left, top, 26 + screen.right, bottom),
+    };
+  }
+
+  /// The margins for [side] of a page built under a [PageInsets].
+  static EdgeInsets inContext(BuildContext context, PageSide side) =>
+      of(side, PageInsets.of(context));
+}
+
+/// The parts of the screen the pages run under but must not print on.
+///
+/// Unfolded, the book is laid edge to edge, so its spine sits on the hinge
+/// and its paper reaches the edges of the glass; the status column and the
+/// home indicator become margin.
+class PageInsets extends InheritedWidget {
+  final EdgeInsets insets;
+
+  const PageInsets({super.key, required this.insets, required super.child});
+
+  static EdgeInsets of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PageInsets>()?.insets ??
+      EdgeInsets.zero;
+
+  @override
+  bool updateShouldNotify(PageInsets old) => old.insets != insets;
 }
 
 /// How each verse should look on the page, and what touching it does.
@@ -423,11 +459,12 @@ class PlatePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final m = PageMargins.of(side);
+    final m = PageMargins.inContext(context, side);
     return PaperPage(
       side: side,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(m.left - 8, 34, m.right - 8, 28),
+        padding: EdgeInsets.fromLTRB(m.left - 8, 34 + m.top - PageMargins.head,
+            m.right - 8, 28 + m.bottom - PageMargins.foot),
         child: Column(
           children: [
             Expanded(
@@ -485,69 +522,155 @@ class PlatePage extends StatelessWidget {
   }
 }
 
-/// The page after a chapter's last: a tailpiece, and the way on.
+/// The page after a chapter's last, set the way a printed book closes one
+/// part and points to the next: a tailpiece, a colophon, and at the foot a
+/// catchword, the heading of what follows, so the page is a page of the
+/// book rather than an empty one. Turning it opens the next chapter.
 class ChapterEndPage extends StatelessWidget {
   final PageSide side;
-  final String label;
+
+  /// "Genesis · Chapter Four"
+  final String kicker;
+
+  /// "Here endeth chapter four." / "Here endeth the Book of Genesis."
+  final String closing;
   final String? vignette;
-  final String? nextLabel;
+
+  /// What comes next: its kicker ("Genesis · Chapter Five") and title.
+  final String? nextKicker;
+  final String? nextTitle;
   final VoidCallback? onNext;
+  final int folio;
 
   const ChapterEndPage({
     super.key,
     required this.side,
-    required this.label,
+    required this.kicker,
+    required this.closing,
+    required this.folio,
     this.vignette,
-    this.nextLabel,
+    this.nextKicker,
+    this.nextTitle,
     this.onNext,
   });
 
   @override
   Widget build(BuildContext context) {
+    final m = PageMargins.inContext(context, side);
+    final hasNext = onNext != null && nextTitle != null;
     return PaperPage(
       side: side,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(36),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (vignette != null)
-                SizedBox(
-                    height: 86,
-                    child: PlateImage(asset: vignette!, fit: BoxFit.contain))
-              else
-                const Fleuron(color: BiblePalette.giltRule, size: 14),
-              const SizedBox(height: 18),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontFamily: BibleType.display,
-                    fontStyle: FontStyle.italic,
-                    fontVariations: [FontVariation('wght', 500)],
-                    fontSize: 20,
-                    color: BiblePalette.inkSoft,
-                  )),
-              if (onNext != null && nextLabel != null) ...[
-                const SizedBox(height: 22),
-                OutlinedButton(
-                  onPressed: onNext,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: BiblePalette.rubric,
-                    minimumSize: const Size(44, 44),
-                    side: BorderSide(
-                        color: BiblePalette.rubric.withValues(alpha: 0.45)),
-                    shape: const StadiumBorder(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                  ),
-                  child: Text(nextLabel!,
-                      style: const TextStyle(fontFamily: 'Spectral')),
-                ),
-              ],
-            ],
+      child: Stack(
+        children: [
+          Positioned(
+            left: m.left,
+            right: m.right,
+            top: m.top,
+            bottom: m.bottom,
+            child: LayoutBuilder(builder: (context, box) {
+              final art = math.min(box.maxHeight * 0.30, 170.0);
+              return Column(
+                children: [
+                  const Spacer(flex: 3),
+                  if (vignette != null)
+                    SizedBox(
+                        height: art,
+                        child:
+                            PlateImage(asset: vignette!, fit: BoxFit.contain))
+                  else
+                    const Fleuron(color: BiblePalette.giltRule, size: 18),
+                  const SizedBox(height: 22),
+                  Text(kicker.toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: ChapterHeading.kickerStyle),
+                  const SizedBox(height: 10),
+                  Text(closing,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontFamily: BibleType.display,
+                        fontStyle: FontStyle.italic,
+                        fontVariations: [FontVariation('wght', 500)],
+                        fontSize: 22,
+                        height: 1.2,
+                        color: BiblePalette.inkSoft,
+                      )),
+                  const SizedBox(height: 16),
+                  const _GiltRule(),
+                  const Spacer(flex: 4),
+                  if (hasNext)
+                    Semantics(
+                      button: true,
+                      label: 'Turn to $nextKicker, $nextTitle',
+                      excludeSemantics: true,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onNext,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            children: [
+                              Text(nextKicker!.toUpperCase(),
+                                  textAlign: TextAlign.center,
+                                  style: ChapterHeading.kickerStyle.copyWith(
+                                      fontSize: 9.5,
+                                      color: BiblePalette.rubric)),
+                              const SizedBox(height: 6),
+                              Text(nextTitle!,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  style: ChapterHeading.titleStyle(24)),
+                              const SizedBox(height: 8),
+                              const Text('Turn the page  ›',
+                                  style: TextStyle(
+                                    fontFamily: BibleType.display,
+                                    fontStyle: FontStyle.italic,
+                                    fontVariations: [
+                                      FontVariation('wght', 500)
+                                    ],
+                                    fontSize: 16,
+                                    color: BiblePalette.faint,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                ],
+              );
+            }),
           ),
-        ),
+          Positioned(
+            bottom: 16 + m.bottom - PageMargins.foot,
+            left: side == PageSide.left ? m.left : null,
+            right: side == PageSide.left ? null : m.right,
+            child: Folio(folio),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// A short gilt rule with a lozenge at its centre.
+class _GiltRule extends StatelessWidget {
+  const _GiltRule();
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Container(
+        width: 46,
+        height: 0.8,
+        color: BiblePalette.giltRule.withValues(alpha: 0.7));
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        line,
+        const SizedBox(width: 8),
+        const Fleuron(color: BiblePalette.giltRule, size: 9),
+        const SizedBox(width: 8),
+        line,
+      ],
     );
   }
 }
