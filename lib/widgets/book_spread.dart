@@ -40,6 +40,10 @@ class BookSpread extends StatefulWidget {
   /// Called when a turn settles on a new view.
   final ValueChanged<int> onSpreadChanged;
 
+  /// Turning forward from the last view (a swipe or a tap at the fore-edge)
+  /// calls this, so the book reads on into whatever follows.
+  final VoidCallback? onTurnPastEnd;
+
   /// True to skip the turning animation (Reduce Motion).
   final bool reduceMotion;
 
@@ -66,6 +70,7 @@ class BookSpread extends StatefulWidget {
     required this.blankBuilder,
     required this.onSpreadChanged,
     this.reduceMotion = false,
+    this.onTurnPastEnd,
     this.interactive = true,
     this.pagesPerView = 2,
     this.revision,
@@ -238,6 +243,14 @@ class _BookSpreadState extends State<BookSpread>
   void _onDragEnd(DragEndDetails d) {
     // About two page widths of finger travel make a whole turn.
     final velocity = -(d.primaryVelocity ?? 0) / (_pageWidth * 1.7);
+    final last = (_viewCount - 1).toDouble();
+    if (_dragFrom >= last - 0.0005 &&
+        widget.onTurnPastEnd != null &&
+        (_pos.value - last > 0.04 || (velocity > 0.45 && _pos.value > last))) {
+      _settleTo(last.round(), velocity: 0);
+      widget.onTurnPastEnd!();
+      return;
+    }
     final base = _pos.value.floorToDouble();
     final frac = _pos.value - base;
     double target;
@@ -252,6 +265,13 @@ class _BookSpreadState extends State<BookSpread>
 
   /// Turn one view forward or back, as a tap in the margin does.
   void turn(int direction) {
+    if (direction > 0 &&
+        _pos.value.round() >= _viewCount - 1 &&
+        !_pos.isAnimating &&
+        widget.onTurnPastEnd != null) {
+      widget.onTurnPastEnd!();
+      return;
+    }
     final target = (_pos.value.round() + direction).clamp(0, _viewCount - 1);
     if (target == _pos.value.round() && !_pos.isAnimating) return;
     _grab = 0.72;

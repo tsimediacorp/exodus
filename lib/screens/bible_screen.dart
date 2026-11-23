@@ -152,6 +152,12 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Pages a view: 2 unfolded (facing pages), 1 folded.
   int _per = 1;
 
+  /// The screen's insets the pages run under (unfolded only).
+  EdgeInsets _insets = EdgeInsets.zero;
+
+  bool get _nextChapterExists =>
+      _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
+
   /// Inputs the current typesetting was made for. Setting a chapter is not
   /// free, so it is only redone when the translation, chapter, page size,
   /// pages a view or text scale actually change.
@@ -252,7 +258,7 @@ class _BibleScreenState extends State<BibleScreen> {
   void _typeset(List<String> verses, Size page, int per, TextScaler scaler) {
     final key = '${_bible.currentTranslation.id}/$_bookIndex/$_chapter/'
         '${page.width.round()}x${page.height.round()}/$per/'
-        '${scaler.scale(100).round()}/${_art.isLoaded}';
+        '${scaler.scale(100).round()}/${_art.isLoaded}/$_insets';
     if (key == _setFor) return;
 
     // Keep the reader on the verse they were looking at, rather than snapping
@@ -261,7 +267,7 @@ class _BibleScreenState extends State<BibleScreen> {
         _pendingVerseJump ?? (_set == null ? null : _firstVisibleVerse);
 
     final side = per == 2 ? PageSide.left : PageSide.single;
-    final m = PageMargins.of(side);
+    final m = PageMargins.of(side, _insets);
     final width = page.width - m.horizontal;
     final content = page.height - m.vertical;
     final plates = _art.platesFor(_bookIndex, _chapter);
@@ -1280,6 +1286,7 @@ class _BibleScreenState extends State<BibleScreen> {
     // Turning pages, the book is the whole screen: paper to the edges, its
     // controls drawn on the head of the page. Scrolling keeps the bar.
     final book = _paged && !_loading && _loadError == null;
+    final spread = ExodusLayout.isExpanded(context);
     return Scaffold(
       backgroundColor: book ? BiblePalette.paper : const Color(0xFF0B0E17),
       // Reading mode takes the bar away entirely; the page runs to the top.
@@ -1370,7 +1377,12 @@ class _BibleScreenState extends State<BibleScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: SafeArea(top: !_immersive, child: _body()),
+            // Unfolded, the open book is laid edge to edge: its spine on the
+            // hinge, its paper to the glass, and the screen's insets become
+            // page margin (see PageInsets).
+            child: book && spread
+                ? _body()
+                : SafeArea(top: !_immersive, child: _body()),
           ),
           if (_paged && !_immersive)
             Positioned(
@@ -1384,7 +1396,12 @@ class _BibleScreenState extends State<BibleScreen> {
               bottom: 0,
               left: 0,
               right: 0,
-              child: SafeArea(top: false, child: _bookFooter()),
+              // Centred on the spine, not on what the status column leaves.
+              child: SafeArea(
+                  top: false,
+                  left: !spread,
+                  right: !spread,
+                  child: _bookFooter()),
             ),
           if (book && _selected.isNotEmpty && !drawing)
             Positioned(
@@ -1739,29 +1756,39 @@ class _BibleScreenState extends State<BibleScreen> {
               final per = ExodusLayout.isExpanded(context) ? 2 : 1;
               final page =
                   Size(constraints.maxWidth / per, constraints.maxHeight);
+              final pad = MediaQuery.viewPaddingOf(context);
+              _insets = per == 2
+                  ? EdgeInsets.fromLTRB(
+                      pad.left, _immersive ? 0 : pad.top, pad.right, pad.bottom)
+                  : EdgeInsets.zero;
               _typeset(verses, page, per, scaler);
               final decor = _decor();
-              return BookSpread(
-                pagesPerView: per,
-                pageCount: _leaves.length,
-                spread: per == 2 ? _pageIndex ~/ 2 : _pageIndex,
-                interactive: _tool == InkTool.off,
-                reduceMotion: ExodusLayout.reduceMotion(context),
-                paperColor: BiblePalette.paper,
-                revision: Object.hash(
-                  _setFor,
-                  _marksRev,
-                  Object.hashAll(_selected),
-                  _highlight?.verseStart,
-                  _narratedVerse,
-                  _artRev,
-                ),
-                onSpreadChanged: (s) => setState(() => _pageIndex =
-                    (per == 2 ? s * 2 : s).clamp(0, _leaves.length - 1)),
-                pageBuilder: (context, i) => _leafPage(i, per, decor),
-                blankBuilder: (context) => PaperPage(
-                  side: per == 1 ? PageSide.single : PageSide.right,
-                  child: const SizedBox.expand(),
+              return PageInsets(
+                insets: _insets,
+                child: BookSpread(
+                  pagesPerView: per,
+                  pageCount: _leaves.length,
+                  spread: per == 2 ? _pageIndex ~/ 2 : _pageIndex,
+                  interactive: _tool == InkTool.off,
+                  reduceMotion: ExodusLayout.reduceMotion(context),
+                  paperColor: BiblePalette.paper,
+                  revision: Object.hash(
+                    _setFor,
+                    _marksRev,
+                    Object.hashAll(_selected),
+                    _highlight?.verseStart,
+                    _narratedVerse,
+                    _artRev,
+                  ),
+                  onSpreadChanged: (s) => setState(() => _pageIndex =
+                      (per == 2 ? s * 2 : s).clamp(0, _leaves.length - 1)),
+                  pageBuilder: (context, i) => _leafPage(i, per, decor),
+                  onTurnPastEnd:
+                      _nextChapterExists ? () => _changeChapter(1) : null,
+                  blankBuilder: (context) => PaperPage(
+                    side: per == 1 ? PageSide.single : PageSide.right,
+                    child: const SizedBox.expand(),
+                  ),
                 ),
               );
             },
@@ -1821,18 +1848,43 @@ class _BibleScreenState extends State<BibleScreen> {
           reference: '$_bookName $_chapter:$v',
         );
       case _EndLeaf():
-        final hasNext =
-            _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
-        final nextBook = _chapter < _chapterCount ? _bookIndex : _bookIndex + 1;
-        final nextChapter = _chapter < _chapterCount ? _chapter + 1 : 1;
+        final psalm = _bookName == 'Psalms';
+        final lastOfBook = _chapter >= _chapterCount;
+        final String? nextKicker;
+        final String? nextTitle;
+        if (_nextChapterExists) {
+          final nb = lastOfBook ? _bookIndex + 1 : _bookIndex;
+          final nc = lastOfBook ? 1 : _chapter + 1;
+          final name = _bible.bookName(nb);
+          final chapterName =
+              '${name == 'Psalms' ? 'Psalm' : 'Chapter'} ${numberWords(nc)}';
+          final plates = _art.platesFor(nb, nc);
+          nextKicker = lastOfBook
+              ? 'The Book of $name'
+              : plates.isEmpty
+                  ? name
+                  : '$name · $chapterName';
+          nextTitle = plates.isEmpty
+              ? (lastOfBook ? name : chapterName)
+              : plates.first.title;
+        } else {
+          nextKicker = null;
+          nextTitle = null;
+        }
         return ChapterEndPage(
           side: side,
-          label: 'Here ends $_bookName $_chapter',
+          folio: i + 1,
+          kicker: _bookName,
+          closing: !_nextChapterExists
+              ? 'Here endeth the Holy Bible.'
+              : lastOfBook
+                  ? 'Here endeth the Book of $_bookName.'
+                  : 'Here endeth ${psalm ? 'Psalm' : 'chapter'} '
+                      '${numberWords(_chapter).toLowerCase()}.',
           vignette: _art.vignetteFor(_bookIndex, _chapter + 1),
-          nextLabel: hasNext
-              ? 'Turn to ${_bible.bookName(nextBook)} $nextChapter'
-              : null,
-          onNext: hasNext ? () => _changeChapter(1) : null,
+          nextKicker: nextKicker,
+          nextTitle: nextTitle,
+          onNext: _nextChapterExists ? () => _changeChapter(1) : null,
         );
       case _ProseLeaf(:final slice):
         return _prosePage(slice, side, i, decor);
@@ -1841,7 +1893,7 @@ class _BibleScreenState extends State<BibleScreen> {
 
   /// A page of the chapter's text; the first carries its heading.
   Widget _prosePage(int slice, PageSide side, int index, ProseDecor decor) {
-    final m = PageMargins.of(side);
+    final m = PageMargins.of(side, _insets);
     final set = _set!;
     final heading = slice == 0 ? _heading : null;
     return PaperPage(
@@ -1876,11 +1928,29 @@ class _BibleScreenState extends State<BibleScreen> {
                   decor: decor,
                   notesOnLeft: side == PageSide.left,
                 ),
+                // The chapter's last line is closed with a fleuron, as a
+                // printer marks the end of a part, so a short last page
+                // reads as finished rather than as text that stopped.
+                if (slice == set.slices.length - 1)
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, box) => box.maxHeight < 44
+                          ? const SizedBox.shrink()
+                          : const Align(
+                              alignment: Alignment.topCenter,
+                              child: Padding(
+                                padding: EdgeInsets.only(top: 22),
+                                child: Fleuron(
+                                    color: BiblePalette.giltRule, size: 12),
+                              ),
+                            ),
+                    ),
+                  ),
               ],
             ),
           ),
           Positioned(
-            bottom: 16,
+            bottom: 16 + m.bottom - PageMargins.foot,
             left: side == PageSide.left ? m.left : null,
             right: side == PageSide.left ? null : m.right,
             child: Folio(index + 1),
