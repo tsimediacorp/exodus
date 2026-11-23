@@ -176,7 +176,10 @@ class HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: ExodusTheme.obsidian,
       body: PageBackdrop(
+        // The lists run to the foot of the glass; the home indicator's strip
+        // is scroll padding, not a band the content stops above.
         child: SafeArea(
+          bottom: false,
           // Measured against the room Home actually has, not the screen:
           // beside the rail on the upright inner screen that is ~577pt, and
           // two columns there would each be narrower than the folded phone.
@@ -186,7 +189,7 @@ class HomeScreenState extends State<HomeScreen> {
             // One column, with the margins the larger screen can afford.
             final side = expanded ? 32.0 : 20.0;
             return ListView(
-              padding: EdgeInsets.fromLTRB(side, 8, side, 24),
+              padding: EdgeInsets.fromLTRB(side, 8, side, 24 + _foot),
               children: [
                 ...welcome,
                 const SizedBox(height: 18),
@@ -200,6 +203,9 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   static const double _twoColumnMinWidth = 640;
+
+  /// The home indicator's strip, added to the end of each list.
+  double get _foot => MediaQuery.viewPaddingOf(context).bottom;
 
   /// Set during layout, just before the tiles are built.
   bool _twoColumn = false;
@@ -219,7 +225,7 @@ class HomeScreenState extends State<HomeScreen> {
           // conversations column.
           child: ClipRect(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 8, gutter / 2, 28),
+              padding: EdgeInsets.fromLTRB(24, 8, gutter / 2, 28 + _foot),
               children: left,
             ),
           ),
@@ -244,7 +250,7 @@ class HomeScreenState extends State<HomeScreen> {
           child: ListView(
             // Line the search up with the greeting's baseline region rather
             // than with the logo, so the two columns read as one page.
-            padding: const EdgeInsets.fromLTRB(gutter / 2, 70, 24, 28),
+            padding: EdgeInsets.fromLTRB(gutter / 2, 70, 24, 28 + _foot),
             children: right,
           ),
         ),
