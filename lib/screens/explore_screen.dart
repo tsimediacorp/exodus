@@ -64,9 +64,13 @@ class ExploreScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: ExodusTheme.obsidian,
       body: PageBackdrop(
+        // The list runs to the foot of the glass; the home indicator's
+        // strip is scroll padding, not a band the content stops above.
         child: SafeArea(
+          bottom: false,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            padding: EdgeInsets.fromLTRB(
+                20, 16, 20, 24 + MediaQuery.viewPaddingOf(context).bottom),
             children: [
               const Text('Explore',
                   style: TextStyle(
