@@ -164,6 +164,44 @@ class ExodusNavRail extends StatelessWidget {
   }
 }
 
+/// The screens beside the folded Duo's [ExodusSideRail].
+///
+/// They still see the status column as a right inset, so their text stays
+/// clear of it, but the inset ends just short of the rail's lamp: the rail's
+/// icons sit in the middle of the column, and reserving all of it left a
+/// visible gutter between the conversation and the rail.
+///
+/// The screen's measurements are read here, below the shell's Scaffold, and
+/// not from above it. The Scaffold has already taken the keyboard's height
+/// out of what it hands its body; read from above, that height came back,
+/// and every screen with its own Scaffold shrank for the keyboard a second
+/// time — Counsel's thread squeezed to nothing and its composer pinned to
+/// the top of the screen.
+class BesideSideRail extends StatelessWidget {
+  /// The status column's full width.
+  final double columnWidth;
+  final Widget child;
+
+  const BesideSideRail(
+      {super.key, required this.columnWidth, required this.child});
+
+  /// How much of the status column the screens may use.
+  static const double railOverlap = 18;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final right = (columnWidth - railOverlap).clamp(0.0, columnWidth);
+    return MediaQuery(
+      data: mq.copyWith(
+        padding: mq.padding.copyWith(right: right),
+        viewPadding: mq.viewPadding.copyWith(right: right),
+      ),
+      child: child,
+    );
+  }
+}
+
 /// The folded Duo's navigation, in the status column down the right edge.
 ///
 /// That column is reserved for the clock and signal at the top and empty

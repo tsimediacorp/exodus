@@ -300,7 +300,8 @@ class _HomeShellState extends State<HomeShell> {
       key: _scaffoldKey,
       body: Stack(
         children: [
-          Positioned.fill(child: _besideRail(stack, width)),
+          Positioned.fill(
+              child: BesideSideRail(columnWidth: width, child: stack)),
           Positioned(
             top: 0,
             right: 0,
@@ -314,26 +315,6 @@ class _HomeShellState extends State<HomeShell> {
           ),
         ],
       ),
-    );
-  }
-
-  /// How much of the status column the screens may use. The rail's icons
-  /// and labels sit in the middle of the column; reserving all of it left
-  /// a visible gutter between the conversation and the rail.
-  static const double _railOverlap = 18;
-
-  /// The screens see a right inset that ends just short of the rail's
-  /// lamp, so their content reaches the column instead of stopping a
-  /// third of the way across the gap.
-  Widget _besideRail(Widget child, double width) {
-    final mq = MediaQuery.of(context);
-    final right = (width - _railOverlap).clamp(0.0, width);
-    return MediaQuery(
-      data: mq.copyWith(
-        padding: mq.padding.copyWith(right: right),
-        viewPadding: mq.viewPadding.copyWith(right: right),
-      ),
-      child: child,
     );
   }
 
