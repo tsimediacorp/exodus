@@ -43,9 +43,9 @@ class PageMargins {
 
 /// The parts of the screen the pages run under but must not print on.
 ///
-/// Unfolded, the book is laid edge to edge, so its spine sits on the hinge
-/// and its paper reaches the edges of the glass; the status column and the
-/// home indicator become margin.
+/// The book is laid edge to edge, folded or not, so its paper reaches the
+/// edges of the glass (unfolded, its spine sits on the hinge); the status
+/// column and the home indicator become margin.
 class PageInsets extends InheritedWidget {
   final EdgeInsets insets;
 

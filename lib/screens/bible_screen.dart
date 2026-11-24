@@ -154,7 +154,7 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Pages a view: 2 unfolded (facing pages), 1 folded.
   int _per = 1;
 
-  /// The screen's insets the pages run under (unfolded only).
+  /// The screen's insets the pages run under.
   EdgeInsets _insets = EdgeInsets.zero;
 
   bool get _nextBookExists => _bookIndex < _bible.books.length - 1;
@@ -1466,10 +1466,11 @@ class _BibleScreenState extends State<BibleScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            // Unfolded, the open book is laid edge to edge: its spine on the
-            // hinge, its paper to the glass, and the screen's insets become
-            // page margin (see PageInsets).
-            child: book && spread
+            // The open book is laid edge to edge, folded or not: its paper
+            // to the glass (unfolded, its spine on the hinge), and the
+            // screen's insets — the status column, the home indicator —
+            // become page margin (see PageInsets).
+            child: book
                 ? _body()
                 : SafeArea(top: !_immersive, child: _body()),
           ),
@@ -1846,10 +1847,8 @@ class _BibleScreenState extends State<BibleScreen> {
               final page =
                   Size(constraints.maxWidth / per, constraints.maxHeight);
               final pad = MediaQuery.viewPaddingOf(context);
-              _insets = per == 2
-                  ? EdgeInsets.fromLTRB(
-                      pad.left, _immersive ? 0 : pad.top, pad.right, pad.bottom)
-                  : EdgeInsets.zero;
+              _insets = EdgeInsets.fromLTRB(
+                  pad.left, _immersive ? 0 : pad.top, pad.right, pad.bottom);
               _typeset(page, per, scaler);
               return PageInsets(
                 insets: _insets,
