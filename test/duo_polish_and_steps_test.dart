@@ -97,6 +97,32 @@ void main() {
       expect(newChats, 1);
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets('the keyboard squeezes a screen beside the rail only once',
+        (tester) async {
+      // Folded Duo: status column on the right, keyboard up.
+      tester.view.devicePixelRatio = 3;
+      tester.view.physicalSize = const Size(466, 678) * 3;
+      tester.view.padding = const FakeViewPadding(right: 84 * 3);
+      tester.view.viewPadding = tester.view.padding;
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300 * 3);
+      addTearDown(tester.view.reset);
+      final body = GlobalKey();
+      // The shell's Scaffold around a screen with its own, as Counsel has.
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: BesideSideRail(
+            columnWidth: 84,
+            child: Scaffold(body: SizedBox.expand(key: body)),
+          ),
+        ),
+      ));
+      // Room above the keyboard, not the keyboard's height taken twice.
+      expect(tester.getSize(find.byKey(body)).height, 678 - 300);
+      expect(MediaQuery.paddingOf(body.currentContext!).right,
+          84 - BesideSideRail.railOverlap);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   group('swipe to delete', () {
