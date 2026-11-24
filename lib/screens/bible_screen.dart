@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../config/bible_books.dart';
 import '../layout/exodus_layout.dart';
 import '../models/bible_ref.dart';
 import '../models/saved_verse.dart';
@@ -22,6 +21,7 @@ import '../widgets/book_opening.dart';
 import '../widgets/book_spread.dart';
 import '../widgets/ink_layer.dart';
 import '../widgets/progress_view.dart';
+import '../widgets/stone_picker.dart';
 import '../widgets/verse_card.dart';
 import 'bible_explain_sheet.dart';
 import 'bible_search_screen.dart';
@@ -597,14 +597,20 @@ class _BibleScreenState extends State<BibleScreen> {
   }
 
   Future<void> _pickBook() async {
-    final picked = await showModalBottomSheet<BibleRef>(
-      context: context,
-      backgroundColor: ExodusTheme.obsidian,
-      isScrollControlled: true,
-      builder: (_) => _BookPicker(
-        bible: _bible,
+    final picked = await StonePicker.show(
+      context,
+      StonePicker(
         currentBook: _bookIndex,
         currentChapter: _chapter,
+        chapterCount: (b) =>
+            _bible.books.length > b ? _bible.books[b].chapterCount : 0,
+        titleOf: (b, c) {
+          final plates = _art.platesFor(b, c);
+          if (plates.isNotEmpty) return plates.first.title;
+          final psalm = _bible.bookName(b) == 'Psalms';
+          return '${psalm ? 'Psalm' : 'Chapter'} ${numberWords(c)}';
+        },
+        illustrated: (b, c) => _art.platesFor(b, c).isNotEmpty,
       ),
     );
     if (picked != null) _goTo(picked.bookIndex, picked.chapter);
@@ -2491,141 +2497,6 @@ class _BibleScreenState extends State<BibleScreen> {
           child: Icon(icon, size: 19, color: ExodusTheme.ironMist),
         ),
       ),
-    );
-  }
-}
-
-/// Book then chapter picker.
-class _BookPicker extends StatefulWidget {
-  final BibleService bible;
-  final int currentBook;
-  final int currentChapter;
-
-  const _BookPicker({
-    required this.bible,
-    required this.currentBook,
-    required this.currentChapter,
-  });
-
-  @override
-  State<_BookPicker> createState() => _BookPickerState();
-}
-
-class _BookPickerState extends State<_BookPicker> {
-  int? _expanded;
-
-  @override
-  void initState() {
-    super.initState();
-    _expanded = widget.currentBook;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.75,
-      maxChildSize: 0.92,
-      expand: false,
-      builder: (_, controller) => Column(
-        children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: ExodusTheme.steel,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView.builder(
-              controller: controller,
-              itemCount: BibleBooks.names.length,
-              itemBuilder: (_, i) => _bookTile(i),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bookTile(int i) {
-    final isExpanded = _expanded == i;
-    final chapters =
-        widget.bible.books.isEmpty ? 0 : widget.bible.books[i].chapterCount;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (i == 0 || i == BibleBooks.firstNewTestament)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: Text(
-              i == 0 ? 'OLD TESTAMENT' : 'NEW TESTAMENT',
-              style: const TextStyle(
-                  color: ExodusTheme.ironMist,
-                  fontSize: 11,
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.w700),
-            ),
-          ),
-        InkWell(
-          onTap: () => setState(() => _expanded = isExpanded ? null : i),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 44),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(BibleBooks.names[i],
-                      style: TextStyle(
-                          color: i == widget.currentBook
-                              ? ExodusTheme.brass
-                              : ExodusTheme.porcelain,
-                          fontSize: 15,
-                          fontWeight: i == widget.currentBook
-                              ? FontWeight.w700
-                              : FontWeight.w400)),
-                ),
-                Icon(isExpanded ? Icons.expand_less : Icons.expand_more,
-                    size: 18, color: ExodusTheme.ironMist),
-              ],
-            ),
-          ),
-        ),
-        if (isExpanded)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (var c = 1; c <= chapters; c++)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => Navigator.pop(
-                        context, BibleRef(bookIndex: i, chapter: c)),
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                            color: (i == widget.currentBook &&
-                                    c == widget.currentChapter)
-                                ? ExodusTheme.brass
-                                : ExodusTheme.steel),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text('$c',
-                          style: const TextStyle(
-                              color: ExodusTheme.porcelain, fontSize: 13)),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
     );
   }
 }

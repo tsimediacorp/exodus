@@ -1,7 +1,7 @@
 name: exodus
 description: God's design. Unfiltered. Bible-based AI counsel for young couples.
 publish_to: 'none'
-version: 0.1.0+60
+version: 0.1.0+61
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -74,6 +74,11 @@ flutter:
         - asset: assets/fonts/CormorantGaramond-Variable.ttf
         - asset: assets/fonts/CormorantGaramond-Italic-Variable.ttf
           style: italic
+    # Cinzel (SIL OFL 1.1, assets/fonts/OFL-Cinzel.txt): the inscriptional
+    # capitals cut into the stone chapter picker. Variable, like Cormorant.
+    - family: Cinzel
+      fonts:
+        - asset: assets/fonts/Cinzel-Variable.ttf
     - family: Spectral
       fonts:
         - asset: assets/fonts/Spectral-Light.ttf
