@@ -10,7 +10,6 @@ import '../models/saved_verse.dart';
 import '../services/bible_marks.dart';
 import '../services/bible_art.dart';
 import '../services/bible_service.dart';
-import '../services/bible_typesetter.dart';
 import '../services/progress.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
@@ -18,6 +17,7 @@ import '../theme/exodus_theme.dart';
 import '../widgets/bible_cover.dart';
 import '../widgets/bible_pages.dart';
 import '../widgets/bible_paper.dart';
+import '../widgets/book_flow.dart';
 import '../widgets/book_opening.dart';
 import '../widgets/book_spread.dart';
 import '../widgets/ink_layer.dart';
@@ -143,11 +143,13 @@ class _BibleScreenState extends State<BibleScreen> {
 
   final BibleArt _art = BibleArt.instance;
 
-  /// The chapter set in type, and the pages it falls on.
-  TypesetChapter? _set;
-  List<_Leaf> _leaves = const [];
-  _Heading? _heading;
+  /// The open book set in type, and the pages it falls on.
+  BookFlow? _flow;
+  List<BookLeaf> get _leaves => _flow?.leaves ?? const [];
   int _pageIndex = 0;
+
+  /// Set when turning back past a book's first page: land on its last.
+  bool _landAtEnd = false;
 
   /// Pages a view: 2 unfolded (facing pages), 1 folded.
   int _per = 1;
@@ -155,8 +157,7 @@ class _BibleScreenState extends State<BibleScreen> {
   /// The screen's insets the pages run under (unfolded only).
   EdgeInsets _insets = EdgeInsets.zero;
 
-  bool get _nextChapterExists =>
-      _chapter < _chapterCount || _bookIndex < _bible.books.length - 1;
+  bool get _nextBookExists => _bookIndex < _bible.books.length - 1;
 
   /// Inputs the current typesetting was made for. Setting a chapter is not
   /// free, so it is only redone when the translation, chapter, page size,
@@ -218,23 +219,28 @@ class _BibleScreenState extends State<BibleScreen> {
   }
 
   /// The heading over the chapter's first page.
-  _Heading _headingFor(
-      List<BiblePlate> plates, int per, double width, double content) {
+  /// The heading over [chapter]'s opening. [compact] leaves out the
+  /// ornament (and, folded, the plate), for a chapter opening low on a page
+  /// that has room for its title and first lines but not for art as well.
+  HeadingSpec _headingFor(int book, int chapter, List<BiblePlate> plates,
+      int per, double width, double content,
+      {bool compact = false}) {
     final plate = plates.isEmpty ? null : plates.first;
-    final psalm = _bookName == 'Psalms';
+    final name = _bible.bookName(book);
+    final psalm = name == 'Psalms';
     final chapterName =
-        '${psalm ? 'Psalm' : 'Chapter'} ${numberWords(_chapter)}';
-    final kicker = plate == null ? _bookName : '$_bookName · $chapterName';
+        '${psalm ? 'Psalm' : 'Chapter'} ${numberWords(chapter)}';
+    final kicker = plate == null ? name : '$name · $chapterName';
     final title = plate?.title ?? chapterName;
     // Folded, the plate is let into the head of the page; unfolded it has a
     // page of its own facing this one, and an ornament heads the text.
-    final headpiece = per == 1 ? plate?.asset : null;
+    final headpiece = per == 1 && !compact ? plate?.asset : null;
     final headpieceHeight =
         headpiece == null ? 0.0 : math.min(content * 0.34, width * 0.74);
     final vignette =
-        headpiece == null ? _art.vignetteFor(_bookIndex, _chapter) : null;
+        headpiece == null && !compact ? _art.vignetteFor(book, chapter) : null;
     final titleSize = per == 2 ? 36.0 : 32.0;
-    return _Heading(
+    return HeadingSpec(
       kicker: kicker,
       title: title,
       vignette: vignette,
@@ -252,85 +258,128 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
-  /// Set the chapter in type for pages of [page] size, and lay out the
-  /// leaves of the book: the opening, the plates where they fall, the text,
-  /// and a tailpiece.
-  void _typeset(List<String> verses, Size page, int per, TextScaler scaler) {
-    final key = '${_bible.currentTranslation.id}/$_bookIndex/$_chapter/'
+  /// Set the open book in type for pages of [page] size: its chapters
+  /// running on from page to page, the plates where they fall, and a
+  /// colophon at the end.
+  void _typeset(Size page, int per, TextScaler scaler) {
+    final key = '${_bible.currentTranslation.id}/$_bookIndex/'
         '${page.width.round()}x${page.height.round()}/$per/'
         '${scaler.scale(100).round()}/${_art.isLoaded}/$_insets';
-    if (key == _setFor) return;
+    if (key == _setFor) {
+      _flow?.ensure(_chapter);
+      return;
+    }
 
     // Keep the reader on the verse they were looking at, rather than snapping
-    // to page one whenever the viewport changes.
-    final anchor =
-        _pendingVerseJump ?? (_set == null ? null : _firstVisibleVerse);
+    // to the chapter's head whenever the viewport changes.
+    final sameBook = _flow?.book == _bookIndex;
+    final anchor = _pendingVerseJump ??
+        (sameBook && _leaves.isNotEmpty ? _firstVisibleVerse : null);
 
     final side = per == 2 ? PageSide.left : PageSide.single;
     final m = PageMargins.of(side, _insets);
     final width = page.width - m.horizontal;
     final content = page.height - m.vertical;
-    final plates = _art.platesFor(_bookIndex, _chapter);
-    final heading = _headingFor(plates, per, width, content);
-    final set = TypesetChapter.layout(
-      verses: verses,
+    final book = _bookIndex;
+    final chapters = _bible.books[book];
+    final flow = BookFlow(
+      book: book,
+      chapterCount: chapters.chapterCount,
+      per: per,
       width: width,
+      content: content,
       type: bibleTypeFor(width, scaler),
-      openingHeight: content - heading.height,
-      pageHeight: content,
+      versesOf: chapters.verses,
+      platesOf: (c) => _art.platesFor(book, c),
+      headingOf: (c, plates, compact) =>
+          _headingFor(book, c, plates, per, width, content, compact: compact),
       omittedLabel: _omittedLabel,
     );
 
-    // Plates after the first stand after the page their verse is on.
-    final later = [
-      for (final p in plates.skip(1)) (set.sliceOfVerse(p.verse), p)
-    ];
-    final leaves = <_Leaf>[const _ProseLeaf(0)];
-    if (per == 2 && plates.isNotEmpty) leaves.add(_PlateLeaf(plates.first));
-    for (var s = 0; s < set.slices.length; s++) {
-      if (s > 0) leaves.add(_ProseLeaf(s));
-      for (final (at, p) in later) {
-        if (at == s) leaves.add(_PlateLeaf(p));
-      }
-    }
-    if (per == 1 || leaves.length.isOdd) leaves.add(const _EndLeaf());
-
-    final old = _set;
+    final old = _flow;
     WidgetsBinding.instance.addPostFrameCallback((_) => old?.dispose());
-    _set = set;
-    _heading = heading;
-    _leaves = leaves;
+    _flow = flow;
     _per = per;
     _setFor = key;
     _pendingVerseJump = null;
-    _pageIndex = anchor == null
-        ? _pageIndex.clamp(0, leaves.length - 1)
-        : _leafOfVerse(anchor);
+    if (_landAtEnd) {
+      _landAtEnd = false;
+      flow.ensure(chapters.chapterCount);
+      _pageIndex = flow.leaves.length - 1;
+    } else {
+      _pageIndex = flow.leafOf(_chapter, anchor ?? 1);
+    }
 
-    final art = [
-      for (final p in plates) p.asset,
-      if (heading.vignette != null) heading.vignette!,
-      if (_art.vignetteFor(_bookIndex, _chapter + 1) case final v?) v,
-    ];
     // Pages are measured during layout, after the chrome has been built, so
-    // it needs one more pass to show the new count; and the art is decoded
-    // now, so the plates are on the paper before the leaf is lifted.
+    // it needs one more pass to show the new count.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() {});
-      precacheChapterArt(context, art).then((_) {
-        if (mounted) setState(() => _artRev++);
-      });
+      _precacheAround(_chapter);
     });
   }
 
-  /// The leaf on which verse [v] begins.
-  int _leafOfVerse(int v) {
-    final set = _set;
-    if (set == null || _leaves.isEmpty) return 0;
-    final slice = set.sliceOfVerse(v);
-    final i = _leaves.indexWhere((l) => l is _ProseLeaf && l.slice == slice);
-    return i < 0 ? 0 : i;
+  /// Decode the art of the chapter in front of the reader and the next, so
+  /// the plates are on the paper before the leaf is lifted.
+  void _precacheAround(int chapter) {
+    final flow = _flow;
+    if (flow == null) return;
+    final art = <String>[
+      for (final c in [chapter, chapter + 1]) ...[
+        for (final p in _art.platesFor(flow.book, c)) p.asset,
+        if (flow[c]?.heading.vignette case final v?) v,
+      ],
+      if (_art.vignetteFor(flow.book, flow.chapterCount + 1) case final v?) v,
+    ];
+    precacheChapterArt(context, art).then((_) {
+      if (mounted) setState(() => _artRev++);
+    });
+  }
+
+  /// The leaf on which verse [v] of the open chapter begins.
+  int _leafOfVerse(int v) => _flow?.leafOf(_chapter, v) ?? 0;
+
+  /// Leaves in the view at [index]: the spread, or the single page.
+  Iterable<BookLeaf> _viewLeaves(int index) sync* {
+    final start = _per == 2 ? (index ~/ 2) * 2 : index;
+    for (var i = start; i < start + _per && i < _leaves.length; i++) {
+      yield _leaves[i];
+    }
+  }
+
+  /// The chapter the reader is in at the current view: the one that opens
+  /// on it if any does, otherwise the one running across it.
+  int _chapterAtView() {
+    int? first;
+    for (final leaf in _viewLeaves(_pageIndex)) {
+      switch (leaf) {
+        case TextLeaf(:final runs):
+          for (final r in runs) {
+            if (r.opens) return r.chapter;
+            first ??= r.chapter;
+          }
+        case PlateLeaf(:final plate):
+          first ??= plate.chapter;
+        case ColophonLeaf():
+          first ??= _flow?.chapterCount;
+      }
+    }
+    return first ?? _chapter;
+  }
+
+  /// After a turn: follow the reader into the chapter they have reached.
+  void _followTurn() {
+    final flow = _flow;
+    if (flow == null || _narrating) return;
+    final c = _chapterAtView();
+    if (c == _chapter) return;
+    _chapter = c;
+    _selected.clear();
+    _note = null;
+    flow.ensure(c);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _precacheAround(c);
+    });
   }
 
   /// Swap between turning pages and continuous scrolling. Persisted, because
@@ -340,7 +389,7 @@ class _BibleScreenState extends State<BibleScreen> {
     // Keep the reader where they were: remember the verse currently on screen
     // so the other mode opens at the same place.
     final anchor =
-        _paged && _set != null ? _firstVisibleVerse : _highlight?.verseStart;
+        _paged && _flow != null ? _firstVisibleVerse : _highlight?.verseStart;
     setState(() {
       _paged = !_paged;
       _setFor = null;
@@ -430,7 +479,7 @@ class _BibleScreenState extends State<BibleScreen> {
     if (_paged) {
       // Pages may not be measured yet (first open); park the target and let
       // the pagination pass land on it.
-      if (_set == null) {
+      if (_flow == null) {
         _pendingVerseJump = start;
       } else {
         setState(() => _pageIndex = _leafOfVerse(start));
@@ -499,15 +548,26 @@ class _BibleScreenState extends State<BibleScreen> {
         .join(' ');
   }
 
-  void _goTo(int bookIndex, int chapter) {
+  /// Open [chapter] of [bookIndex]: a turn of the pages within the open
+  /// book, or the other book set in type. [atEnd] lands on the book's last
+  /// page instead, as turning back into it does.
+  void _goTo(int bookIndex, int chapter, {bool atEnd = false}) {
     setState(() {
-      _bookIndex = bookIndex;
-      _chapter = chapter;
       _highlight = null;
       _note = null;
       _selected.clear();
-      _pageIndex = 0;
-      _setFor = null; // set the new chapter in type
+      _pendingVerseJump = null;
+      final flow = _flow;
+      if (flow != null && flow.book == bookIndex && !atEnd) {
+        _chapter = chapter;
+        _pageIndex = flow.leafOf(chapter, 1);
+      } else {
+        _bookIndex = bookIndex;
+        _chapter = chapter;
+        _pageIndex = 0;
+        _landAtEnd = atEnd;
+        _setFor = null; // set the other book in type
+      }
     });
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
@@ -843,14 +903,20 @@ class _BibleScreenState extends State<BibleScreen> {
 
   /// The first verse on the page (or spread) in front of the reader.
   int get _firstVisibleVerse {
-    final set = _set;
-    if (_paged && set != null && _leaves.isNotEmpty) {
-      final start = _per == 2 ? (_pageIndex ~/ 2) * 2 : _pageIndex;
-      for (var i = start; i < _leaves.length; i++) {
-        final leaf = _leaves[i];
-        if (leaf is _ProseLeaf) return set.firstVerseOn(leaf.slice);
+    final flow = _flow;
+    if (_paged && flow != null && _leaves.isNotEmpty) {
+      final c = flow[_chapter];
+      if (c == null) return 1;
+      for (final leaf in _viewLeaves(_pageIndex)) {
+        if (leaf is PlateLeaf && leaf.plate.chapter == _chapter) {
+          return leaf.plate.verse;
+        }
+        if (leaf is! TextLeaf) continue;
+        for (final r in leaf.runs) {
+          if (r.chapter == _chapter) return c.set.firstVerseOn(r.slice);
+        }
       }
-      return set.verseCount;
+      return 1;
     }
     return _highlight?.verseStart ?? 1;
   }
@@ -874,18 +940,35 @@ class _BibleScreenState extends State<BibleScreen> {
       _tool = InkTool.off;
     });
     final tts = TtsService.instance;
-    if (only == null && queue.first == 1) {
-      final ok =
-          await tts.speakAndWait('bible', '$_bookName, chapter $_chapter.');
-      if (!ok || !_narrating) return _finishListening();
-    }
-    for (final v in queue) {
-      if (!mounted || !_narrating) break;
-      if (v < 1 || v > verses.length || _isOmitted(v)) continue;
-      setState(() => _narratedVerse = v);
-      _bringIntoView(v);
-      final ok = await tts.speakAndWait('bible', verses[v - 1]);
-      if (!ok) break;
+    var chapterVerses = verses;
+    var next = queue;
+    // Turning pages, the reading runs on through the book as the pages do;
+    // asked for particular verses, or scrolling, it reads just those.
+    while (true) {
+      if (only == null && next.first == 1) {
+        final ok =
+            await tts.speakAndWait('bible', '$_bookName, chapter $_chapter.');
+        if (!ok || !_narrating) return _finishListening();
+      }
+      for (final v in next) {
+        if (!mounted || !_narrating) return _finishListening();
+        if (v < 1 || v > chapterVerses.length || _isOmitted(v)) continue;
+        setState(() => _narratedVerse = v);
+        _bringIntoView(v);
+        final ok = await tts.speakAndWait('bible', chapterVerses[v - 1]);
+        if (!ok) return _finishListening();
+      }
+      if (only != null || !_paged || !mounted || !_narrating) break;
+      if (_chapter >= _chapterCount) break;
+      setState(() {
+        _chapter++;
+        _narratedVerse = null;
+        _flow?.ensure(_chapter);
+      });
+      _precacheAround(_chapter);
+      chapterVerses = _displayVerses;
+      next = [for (var v = 1; v <= chapterVerses.length; v++) v];
+      if (next.isEmpty) break;
     }
     _finishListening();
   }
@@ -906,7 +989,7 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Turn to (or scroll to) verse [v].
   void _bringIntoView(int v) {
     if (_paged) {
-      if (_set == null) return;
+      if (_flow == null) return;
       final target = _leafOfVerse(v);
       final now = _per == 2 ? _pageIndex ~/ 2 : _pageIndex;
       final next = _per == 2 ? target ~/ 2 : target;
@@ -1761,8 +1844,7 @@ class _BibleScreenState extends State<BibleScreen> {
                   ? EdgeInsets.fromLTRB(
                       pad.left, _immersive ? 0 : pad.top, pad.right, pad.bottom)
                   : EdgeInsets.zero;
-              _typeset(verses, page, per, scaler);
-              final decor = _decor();
+              _typeset(page, per, scaler);
               return PageInsets(
                 insets: _insets,
                 child: BookSpread(
@@ -1774,17 +1856,27 @@ class _BibleScreenState extends State<BibleScreen> {
                   paperColor: BiblePalette.paper,
                   revision: Object.hash(
                     _setFor,
+                    _chapter,
                     _marksRev,
                     Object.hashAll(_selected),
                     _highlight?.verseStart,
                     _narratedVerse,
                     _artRev,
                   ),
-                  onSpreadChanged: (s) => setState(() => _pageIndex =
-                      (per == 2 ? s * 2 : s).clamp(0, _leaves.length - 1)),
-                  pageBuilder: (context, i) => _leafPage(i, per, decor),
+                  onSpreadChanged: (s) => setState(() {
+                    _pageIndex =
+                        (per == 2 ? s * 2 : s).clamp(0, _leaves.length - 1);
+                    _followTurn();
+                  }),
+                  pageBuilder: (context, i) => _leafPage(i, per),
+                  // The book reads on into the next, and back into the last.
                   onTurnPastEnd:
-                      _nextChapterExists ? () => _changeChapter(1) : null,
+                      _nextBookExists ? () => _goTo(_bookIndex + 1, 1) : null,
+                  onTurnBeforeStart: _bookIndex > 0
+                      ? () => _goTo(_bookIndex - 1,
+                          _bible.books[_bookIndex - 1].chapterCount,
+                          atEnd: true)
+                      : null,
                   blankBuilder: (context) => PaperPage(
                     side: per == 1 ? PageSide.single : PageSide.right,
                     child: const SizedBox.expand(),
@@ -1798,24 +1890,46 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
-  /// How each verse looks on the page and what touching it does.
-  ProseDecor _decor() {
-    final marks = _chapterMarks;
+  /// How each verse of [chapter] looks on the page and what touching it
+  /// does. The open chapter carries the selection and the reading; touching
+  /// a verse of a neighbouring chapter on the same page opens that chapter.
+  ProseDecor _decorFor(int chapter) {
+    final marks = _marks.chapter(_bookIndex, chapter);
+    final open = chapter == _chapter;
+    final lit = _highlight != null &&
+        _highlight!.bookIndex == _bookIndex &&
+        _highlight!.chapter == chapter;
+    void enter() {
+      if (open) return;
+      setState(() {
+        _chapter = chapter;
+        _selected.clear();
+        _highlight = null;
+        _note = null;
+      });
+    }
+
     return ProseDecor(
-      selected: _selected,
-      narrated: _narratedVerse,
-      highlightStart: _highlight?.verseStart,
-      highlightEnd: _highlight?.verseEnd,
+      selected: open ? _selected : const {},
+      narrated: open ? _narratedVerse : null,
+      highlightStart: lit ? _highlight!.verseStart : null,
+      highlightEnd: lit ? _highlight!.verseEnd : null,
       legacy: {
         for (final e in marks.highlights.entries)
           e.key: MarkColors.markers[e.value % MarkColors.markers.length],
       },
       notes: marks.notes,
-      onVerseTap: _toggleVerse,
-      onNoteTap: _editNote,
+      onVerseTap: (v) {
+        enter();
+        _toggleVerse(v);
+      },
+      onNoteTap: (v) {
+        enter();
+        _editNote(v);
+      },
       ink: (verses, rectOf, child) => InkLayer(
         book: _bookIndex,
-        chapter: _chapter,
+        chapter: chapter,
         verses: verses,
         verseRect: rectOf,
         tool: _tool,
@@ -1826,76 +1940,65 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
-  /// Leaf [i] of the chapter.
-  Widget _leafPage(int i, int per, ProseDecor decor) {
+  /// Leaf [i] of the book.
+  Widget _leafPage(int i, int per) {
     final side = per == 1
         ? PageSide.single
         : i.isEven
             ? PageSide.left
             : PageSide.right;
-    if (i >= _leaves.length) {
+    final flow = _flow;
+    if (flow == null || i >= _leaves.length) {
       return PaperPage(side: side, child: const SizedBox.expand());
     }
-    final verses = _displayVerses;
     switch (_leaves[i]) {
-      case _PlateLeaf(:final plate):
+      case PlateLeaf(:final plate):
         final v = plate.verse;
+        final verses = _bible.books[flow.book].verses(plate.chapter);
         return PlatePage(
           plate: plate,
           side: side,
           caption: PlatePage.captionFor(
               v >= 1 && v <= verses.length ? verses[v - 1] : ''),
-          reference: '$_bookName $_chapter:$v',
+          reference: '${_bible.bookName(flow.book)} ${plate.chapter}:$v',
         );
-      case _EndLeaf():
-        final psalm = _bookName == 'Psalms';
-        final lastOfBook = _chapter >= _chapterCount;
-        final String? nextKicker;
-        final String? nextTitle;
-        if (_nextChapterExists) {
-          final nb = lastOfBook ? _bookIndex + 1 : _bookIndex;
-          final nc = lastOfBook ? 1 : _chapter + 1;
-          final name = _bible.bookName(nb);
-          final chapterName =
-              '${name == 'Psalms' ? 'Psalm' : 'Chapter'} ${numberWords(nc)}';
-          final plates = _art.platesFor(nb, nc);
-          nextKicker = lastOfBook
-              ? 'The Book of $name'
-              : plates.isEmpty
-                  ? name
-                  : '$name · $chapterName';
-          nextTitle = plates.isEmpty
-              ? (lastOfBook ? name : chapterName)
-              : plates.first.title;
-        } else {
-          nextKicker = null;
-          nextTitle = null;
-        }
-        return ChapterEndPage(
-          side: side,
-          folio: i + 1,
-          kicker: _bookName,
-          closing: !_nextChapterExists
-              ? 'Here endeth the Holy Bible.'
-              : lastOfBook
-                  ? 'Here endeth the Book of $_bookName.'
-                  : 'Here endeth ${psalm ? 'Psalm' : 'chapter'} '
-                      '${numberWords(_chapter).toLowerCase()}.',
-          vignette: _art.vignetteFor(_bookIndex, _chapter + 1),
-          nextKicker: nextKicker,
-          nextTitle: nextTitle,
-          onNext: _nextChapterExists ? () => _changeChapter(1) : null,
-        );
-      case _ProseLeaf(:final slice):
-        return _prosePage(slice, side, i, decor);
+      case ColophonLeaf():
+        return _colophon(flow, side, i);
+      case TextLeaf(:final runs):
+        return _textPage(flow, runs, side, i);
     }
   }
 
-  /// A page of the chapter's text; the first carries its heading.
-  Widget _prosePage(int slice, PageSide side, int index, ProseDecor decor) {
+  /// The page after the book's last: where it ends, and what follows.
+  Widget _colophon(BookFlow flow, PageSide side, int i) {
+    final name = _bible.bookName(flow.book);
+    final last = flow.book >= _bible.books.length - 1;
+    String? nextKicker, nextTitle;
+    if (!last) {
+      final next = _bible.bookName(flow.book + 1);
+      final plates = _art.platesFor(flow.book + 1, 1);
+      nextKicker = 'The Book of $next';
+      nextTitle = plates.isEmpty ? next : plates.first.title;
+    }
+    return ChapterEndPage(
+      side: side,
+      folio: i + 1,
+      kicker: name,
+      closing: last
+          ? 'Here endeth the Holy Bible.'
+          : 'Here endeth the Book of $name.',
+      vignette: _art.vignetteFor(flow.book, flow.chapterCount + 1),
+      nextKicker: nextKicker,
+      nextTitle: nextTitle,
+      onNext: last ? null : () => _goTo(flow.book + 1, 1),
+    );
+  }
+
+  /// A page of text: the run of one chapter, or the end of one and the
+  /// opening of the next.
+  Widget _textPage(
+      BookFlow flow, List<PageRun> runs, PageSide side, int index) {
     final m = PageMargins.of(side, _insets);
-    final set = _set!;
-    final heading = slice == 0 ? _heading : null;
     return PaperPage(
       side: side,
       child: Stack(
@@ -1905,48 +2008,35 @@ class _BibleScreenState extends State<BibleScreen> {
             right: m.right,
             top: m.top,
             bottom: m.bottom,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (heading != null)
-                  // Measured unscaled, so drawn unscaled: the heading is
-                  // display type, and a scaled title would no longer fit the
-                  // space measured for it.
-                  MediaQuery.withNoTextScaling(
-                    child: ChapterHeading(
-                      kicker: heading.kicker,
-                      title: heading.title,
-                      vignette: heading.vignette,
-                      headpiece: heading.headpiece,
-                      headpieceHeight: heading.headpieceHeight,
-                      titleSize: heading.titleSize,
-                    ),
-                  ),
-                ProseView(
-                  chapter: set,
-                  slice: slice,
-                  decor: decor,
-                  notesOnLeft: side == PageSide.left,
+            // Heights are measured when the book is set; the clip keeps a
+            // fraction of a point of rounding from ever drawing past the foot.
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                maxHeight: double.infinity,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final r in runs) ...[
+                      if (r.gap > 0) SizedBox(height: r.gap),
+                      if (r.opens)
+                        // Measured unscaled, so drawn unscaled: the heading
+                        // is display type, and a scaled title would no
+                        // longer fit the space measured for it.
+                        MediaQuery.withNoTextScaling(
+                          child: _headingWidget(flow[r.chapter]!.heading),
+                        ),
+                      ProseView(
+                        chapter: flow[r.chapter]!.set,
+                        slice: r.slice,
+                        decor: _decorFor(r.chapter),
+                        notesOnLeft: side == PageSide.left,
+                      ),
+                    ],
+                  ],
                 ),
-                // The chapter's last line is closed with a fleuron, as a
-                // printer marks the end of a part, so a short last page
-                // reads as finished rather than as text that stopped.
-                if (slice == set.slices.length - 1)
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, box) => box.maxHeight < 44
-                          ? const SizedBox.shrink()
-                          : const Align(
-                              alignment: Alignment.topCenter,
-                              child: Padding(
-                                padding: EdgeInsets.only(top: 22),
-                                child: Fleuron(
-                                    color: BiblePalette.giltRule, size: 12),
-                              ),
-                            ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
           Positioned(
@@ -1959,6 +2049,15 @@ class _BibleScreenState extends State<BibleScreen> {
       ),
     );
   }
+
+  Widget _headingWidget(HeadingSpec h) => ChapterHeading(
+        kicker: h.kicker,
+        title: h.title,
+        vignette: h.vignette,
+        headpiece: h.headpiece,
+        headpieceHeight: h.headpieceHeight,
+        titleSize: h.titleSize,
+      );
 
   /// The reader's controls, drawn in ink on the head of the page rather than
   /// in a bar over it.
@@ -2077,16 +2176,21 @@ class _BibleScreenState extends State<BibleScreen> {
   /// Where the reader is in the chapter, and the way to the next one, at the
   /// foot of the book.
   Widget _bookFooter() {
-    final total = _leaves.length;
-    final String where;
-    if (total <= 1) {
-      where = '';
-    } else if (_per == 2) {
-      final first = (_pageIndex ~/ 2) * 2 + 1;
-      final last = math.min(first + 1, total);
-      where = '  ·  ${first == last ? first : '$first\u2013$last'} of $total';
-    } else {
-      where = '  ·  ${_pageIndex + 1} of $total';
+    // Pages of the open chapter, counted from its opening page.
+    final c = _flow?[_chapter];
+    var where = '';
+    if (c != null && c.openingLeaf >= 0) {
+      final open = c.openingLeaf;
+      final end = c.lastLeaf >= 0 ? c.lastLeaf : _leaves.length - 1;
+      final total = end - open + 1;
+      final viewStart = _per == 2 ? (_pageIndex ~/ 2) * 2 : _pageIndex;
+      final viewEnd = math.min(viewStart + _per - 1, _leaves.length - 1);
+      final first = (math.max(viewStart, open) - open + 1).clamp(1, total);
+      final last = (math.min(viewEnd, end) - open + 1).clamp(first, total);
+      if (total > 1) {
+        where = '  ·  ${first == last ? first : '$first\u2013$last'} '
+            'of $total';
+      }
     }
     const ink = BiblePalette.faint;
     return SizedBox(
@@ -2524,47 +2628,4 @@ class _BookPickerState extends State<_BookPicker> {
       ],
     );
   }
-}
-
-/// A leaf of the open chapter.
-sealed class _Leaf {
-  const _Leaf();
-}
-
-/// A page of the chapter's text: band [slice] of the typeset chapter.
-class _ProseLeaf extends _Leaf {
-  final int slice;
-  const _ProseLeaf(this.slice);
-}
-
-/// A full page of art.
-class _PlateLeaf extends _Leaf {
-  final BiblePlate plate;
-  const _PlateLeaf(this.plate);
-}
-
-/// The tailpiece after the chapter's last page.
-class _EndLeaf extends _Leaf {
-  const _EndLeaf();
-}
-
-/// The heading over a chapter's first page, as measured.
-class _Heading {
-  final String kicker;
-  final String title;
-  final String? vignette;
-  final String? headpiece;
-  final double headpieceHeight;
-  final double titleSize;
-  final double height;
-
-  const _Heading({
-    required this.kicker,
-    required this.title,
-    required this.vignette,
-    required this.headpiece,
-    required this.headpieceHeight,
-    required this.titleSize,
-    required this.height,
-  });
 }

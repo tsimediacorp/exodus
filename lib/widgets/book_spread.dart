@@ -44,6 +44,10 @@ class BookSpread extends StatefulWidget {
   /// calls this, so the book reads on into whatever follows.
   final VoidCallback? onTurnPastEnd;
 
+  /// Turning back from the first view: the book reads back into the one
+  /// before it.
+  final VoidCallback? onTurnBeforeStart;
+
   /// True to skip the turning animation (Reduce Motion).
   final bool reduceMotion;
 
@@ -71,6 +75,7 @@ class BookSpread extends StatefulWidget {
     required this.onSpreadChanged,
     this.reduceMotion = false,
     this.onTurnPastEnd,
+    this.onTurnBeforeStart,
     this.interactive = true,
     this.pagesPerView = 2,
     this.revision,
@@ -251,6 +256,13 @@ class _BookSpreadState extends State<BookSpread>
       widget.onTurnPastEnd!();
       return;
     }
+    if (_dragFrom <= 0.0005 &&
+        widget.onTurnBeforeStart != null &&
+        (_pos.value < -0.04 || (velocity < -0.45 && _pos.value < 0))) {
+      _settleTo(0, velocity: 0);
+      widget.onTurnBeforeStart!();
+      return;
+    }
     final base = _pos.value.floorToDouble();
     final frac = _pos.value - base;
     double target;
@@ -270,6 +282,13 @@ class _BookSpreadState extends State<BookSpread>
         !_pos.isAnimating &&
         widget.onTurnPastEnd != null) {
       widget.onTurnPastEnd!();
+      return;
+    }
+    if (direction < 0 &&
+        _pos.value.round() <= 0 &&
+        !_pos.isAnimating &&
+        widget.onTurnBeforeStart != null) {
+      widget.onTurnBeforeStart!();
       return;
     }
     final target = (_pos.value.round() + direction).clamp(0, _viewCount - 1);
