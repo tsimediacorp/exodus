@@ -116,6 +116,43 @@ void main() {
       expect(find.text('page 0').hitTestable(), findsNothing);
     });
 
+    testWidgets('past either end, the book hands on to its neighbour',
+        (tester) async {
+      var view = 0, past = 0, before = 0;
+      await tester.pumpWidget(StatefulBuilder(
+        builder: (context, setState) => MaterialApp(
+          home: Scaffold(
+            body: BookSpread(
+              pagesPerView: 1,
+              pageCount: 2,
+              spread: view,
+              onSpreadChanged: (s) => setState(() => view = s),
+              onTurnPastEnd: () => past++,
+              onTurnBeforeStart: () => before++,
+              pageBuilder: (_, i) => ColoredBox(
+                  color: Colors.white, child: Center(child: Text('page $i'))),
+              blankBuilder: (_) => const SizedBox(),
+            ),
+          ),
+        ),
+      ));
+      final size = tester.getSize(find.byType(BookSpread));
+      final left = Offset(size.width * 0.05, size.height / 2);
+      final right = Offset(size.width * 0.95, size.height / 2);
+      // From the first page, turning back asks for the book before.
+      await tester.tapAt(left);
+      await tester.pumpAndSettle();
+      expect((before, past, view), (1, 0, 0));
+      // Within the book a tap just turns the page.
+      await tester.tapAt(right);
+      await tester.pumpAndSettle();
+      expect((before, past, view), (1, 0, 1));
+      // From the last, turning on asks for the book after.
+      await tester.tapAt(right);
+      await tester.pumpAndSettle();
+      expect((before, past, view), (1, 1, 1));
+    });
+
     test('the leaf lifts from the free edge, arches, and lands flat', () {
       const page = Size(300, 500);
       double edge(double t, {bool projected = false}) => PageCurlPainter.edgeAt(
